@@ -113,6 +113,8 @@ Every change the factory ships clears all three gates.
 
 The journeys in `harness/END-TO-END.md` are the full version. This runs on every change that touches runnable code, including ones that "seem unrelated". It is not optional.
 
+**Staged delivery (owner decision, 2026-10-20).** The build order in `docs/prd.md` section 7 is the delivery plan, so Gate 3 applies to what exists at the change being tested: every step whose capability is already built on `main` or in the change must pass, and a step whose capability is not built yet passes as "not yet built" with evidence that it is absent (for example a 404). A change may never make a previously passing step fail. Once increment 18 lands, every step is required with no exceptions.
+
 ## Open questions -- decisions nobody has made yet
 
 These are undecided, not forbidden. **The factory may propose an answer to any of them**, build against it, and record what it assumed -- the merge is then held for a human, so nothing ships on a guess and nothing stops for one.
@@ -131,6 +133,7 @@ These are undecided, not forbidden. **The factory may propose an answer to any o
 
 ## Decisions
 
+- 2026-10-20 **Must every change pass the complete journeys, or is delivery staged?** Staged: Gate 3 covers what is built, unbuilt steps pass as "not yet built", nothing may regress, and from increment 18 the full journeys are required (see Gate 3).
 - 2026-10-20 **Which stack?** Python 3.12 + FastAPI with uv; Postgres 17 + pgvector; Vite + React + TypeScript served by the backend on the same port.
 - 2026-10-20 **Which model provider?** OpenRouter, one chat and one embedding model, both configurable, with `TKA_MODELS=fake` for tests and runtime checks.
 - 2026-10-20 **Who owns the database server?** Not the app: `DATABASE_URL` always points at an existing, empty database with pgvector; the app only migrates it.

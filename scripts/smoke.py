@@ -13,7 +13,7 @@ from pathlib import Path
 
 import httpx
 
-from app.db import connect
+from app.db import MIGRATIONS, connect, migration_files
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -144,7 +144,9 @@ def ledger(database_url: str) -> list[dict[str, object]]:
         rows = connection.execute(
             "SELECT version, applied_at FROM schema_migrations ORDER BY version"
         ).fetchall()
-        assert [row[0] for row in rows] == [1]
+        assert [row[0] for row in rows] == [
+            version for version, _ in migration_files(MIGRATIONS)
+        ]
         return [
             {"version": version, "applied_at": applied_at.isoformat()}
             for version, applied_at in rows

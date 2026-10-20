@@ -49,9 +49,12 @@ def test_initialization_and_restart_keep_versions_and_timestamps(
     db.run_migrations(database_url)
     with db.connect(database_url) as connection:
         before = connection.execute(
-            "SELECT version, applied_at FROM schema_migrations"
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version"
         ).fetchall()
-        assert len(before) == 1 and before[0][0] == 1 and before[0][1] is not None
+        assert [row[0] for row in before] == [
+            version for version, _ in db.migration_files(db.MIGRATIONS)
+        ]
+        assert all(row[1] is not None for row in before)
         assert connection.execute(
             "SELECT extname FROM pg_extension WHERE extname='vector'"
         ).fetchone() == ("vector",)
@@ -59,7 +62,7 @@ def test_initialization_and_restart_keep_versions_and_timestamps(
     with db.connect(database_url) as connection:
         assert (
             connection.execute(
-                "SELECT version, applied_at FROM schema_migrations"
+                "SELECT version, applied_at FROM schema_migrations ORDER BY version"
             ).fetchall()
             == before
         )
@@ -73,8 +76,8 @@ def test_concurrent_initializations_converge(database_url: str) -> None:
             future.result(timeout=30)
     with db.connect(database_url) as connection:
         assert connection.execute(
-            "SELECT version FROM schema_migrations"
-        ).fetchall() == [(1,)]
+            "SELECT version FROM schema_migrations ORDER BY version"
+        ).fetchall() == [(version,) for version, _ in db.migration_files(db.MIGRATIONS)]
 
 
 @pytest.mark.database
@@ -100,9 +103,13 @@ def test_incompatible_bookkeeping_fails_closed(database_url: str) -> None:
 @pytest.mark.database
 def test_failed_forward_migration_rolls_back(database_url: str, tmp_path: Path) -> None:
     db.run_migrations(database_url)
-    for source in db.MIGRATIONS.glob("*.sql"):
-        (tmp_path / source.name).write_text(source.read_text(), encoding="utf-8")
-    (tmp_path / "0002_failure.sql").write_text(
+    migrations = db.migration_files(db.MIGRATIONS)
+    for _, source in migrations:
+        (tmp_path / source.name).write_text(
+            source.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    next_version = migrations[-1][0] + 1
+    (tmp_path / f"{next_version:04d}_failure.sql").write_text(
         "CREATE TABLE must_rollback (id integer); SELECT 1 / 0;", encoding="utf-8"
     )
     with pytest.raises(psycopg.errors.DivisionByZero):
@@ -112,8 +119,8 @@ def test_failed_forward_migration_rolls_back(database_url: str, tmp_path: Path) 
             None,
         )
         assert connection.execute(
-            "SELECT version FROM schema_migrations"
-        ).fetchall() == [(1,)]
+            "SELECT version FROM schema_migrations ORDER BY version"
+        ).fetchall() == [(version,) for version, _ in migrations]
 
 
 @pytest.mark.database

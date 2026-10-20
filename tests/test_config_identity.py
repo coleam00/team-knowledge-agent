@@ -60,6 +60,41 @@ def test_real_git_fallback_ignores_obsolete_override(
     assert build_id.resolve_build_id() == expected
 
 
+@pytest.mark.parametrize("directory", ["checkout with spaces", "caf\u00e9", "\u0101"])
+def test_git_identity_in_non_ascii_checkout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, directory: str
+) -> None:
+    checkout = tmp_path / directory
+    checkout.mkdir()
+    subprocess.run(
+        ["git", "init", str(checkout)], check=True, capture_output=True, timeout=3
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Identity fixture",
+        ],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        timeout=3,
+    )
+    expected = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=checkout, encoding="utf-8", timeout=3
+    ).strip()
+    monkeypatch.setattr(build_id, "SOURCE_ROOT", checkout)
+    assert build_id.resolve_build_id() == expected
+
+
 @pytest.mark.parametrize(
     "failure",
     [

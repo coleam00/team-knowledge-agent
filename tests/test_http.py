@@ -27,6 +27,7 @@ def wait_for_health(client: TestClient, status: int) -> None:
 def test_health_waits_for_initialization_and_recovers_after_probe_failure(
     monkeypatch: pytest.MonkeyPatch,
     client_factory: ClientFactory,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     entered, release = threading.Event(), threading.Event()
 
@@ -49,8 +50,13 @@ def test_health_waits_for_initialization_and_recovers_after_probe_failure(
             release.set()
         wait_for_health(client, 200)
         assert client.get("/api/health").json() == {"status": "ok", "db": "ok"}
-        probe.side_effect = RuntimeError("database offline")
-        assert client.get("/api/health").status_code == 503
+        probe.side_effect = RuntimeError("postgresql://user:probe-secret@host/database")
+        response = client.get("/api/health")
+        assert response.status_code == 503
+        assert response.json() == {"status": "unavailable", "db": "unavailable"}
+        assert "probe-secret" not in response.text
+        assert "Database probe failed (RuntimeError)" in caplog.text
+        assert "probe-secret" not in caplog.text
         probe.side_effect = None
         assert client.get("/api/health").status_code == 200
     migration.assert_called_once()

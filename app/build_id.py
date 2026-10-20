@@ -13,7 +13,7 @@ def resolve_build_id() -> str:
             ["git", "rev-parse", "--show-toplevel"],
             cwd=SOURCE_ROOT,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             check=True,
             timeout=3,
         )
@@ -23,7 +23,7 @@ def resolve_build_id() -> str:
             ["git", "rev-parse", "HEAD"],
             cwd=SOURCE_ROOT,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             check=True,
             timeout=3,
         )

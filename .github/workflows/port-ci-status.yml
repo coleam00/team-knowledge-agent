@@ -1,0 +1,44 @@
+# Reports the result of every CI run on main to Port, so the repo's
+# "CI passing on main" scorecard rule updates live, then asks Port to resync
+# (Port gets no GitHub webhooks for personal accounts). Owner-managed Port
+# wiring, not app code.
+name: port-ci-status
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+permissions: {}
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send the CI conclusion to Port
+        env:
+          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          def call(url, body, token=None):
+              req = urllib.request.Request(url, json.dumps(body).encode(), method="POST" if token is None else "PATCH")
+              req.add_header("Content-Type", "application/json")
+              if token:
+                  req.add_header("Authorization", "Bearer " + token)
+              return json.load(urllib.request.urlopen(req))
+          auth = {"clientId": os.environ["PORT_CLIENT_ID"], "clientSecret": os.environ["PORT_CLIENT_SECRET"]}
+          token = call("https://api.port.io/v1/auth/access_token", auth)["accessToken"]
+          repo, conclusion = os.environ["REPO"], os.environ["CONCLUSION"]
+          call(f"https://api.port.io/v1/blueprints/githubRepository/entities/{repo}",
+               {"properties": {"ci_main_status": conclusion}}, token)
+          print(f"Reported {conclusion} for {repo} to Port")
+          # Personal GitHub accounts get no live events in Port, so refresh the
+          # files, PRs and scorecard inputs after every CI run on main.
+          req = urllib.request.Request("https://api.port.io/v1/integration/github-ocean/resync", b"{}", method="POST")
+          req.add_header("Content-Type", "application/json")
+          req.add_header("Authorization", "Bearer " + token)
+          urllib.request.urlopen(req)
+          print("Requested a Port resync")
+          PY

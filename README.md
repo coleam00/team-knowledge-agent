@@ -84,7 +84,7 @@ For the live smoke check, build the web app and supply a **fresh empty** databas
 and `FACTORY_RUNTIME_CANDIDATE` equal to the checkout's `git rev-parse HEAD`:
 
 ```text
-uv run python scripts/smoke.py
+uv run python -m scripts.smoke
 ```
 
 Smoke checks real HTTP responses and assets, the extension and migration ledger,

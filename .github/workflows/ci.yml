@@ -95,7 +95,7 @@ jobs:
       - name: Verify live app and restart
         run: |
           export FACTORY_RUNTIME_CANDIDATE="$(git rev-parse HEAD)"
-          uv run python scripts/smoke.py --output smoke-result.json
+          uv run python -m scripts.smoke --output smoke-result.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

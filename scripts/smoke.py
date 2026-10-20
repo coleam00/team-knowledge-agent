@@ -12,7 +12,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 import httpx
-import psycopg
+
+from app.db import connect
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -136,9 +137,7 @@ def absent_features(client: httpx.Client) -> list[dict[str, object]]:
 
 
 def ledger(database_url: str) -> list[dict[str, object]]:
-    with psycopg.connect(
-        database_url, connect_timeout=3, options="-c statement_timeout=5000"
-    ) as connection:
+    with connect(database_url) as connection:
         assert connection.execute(
             "SELECT extname FROM pg_extension WHERE extname = 'vector'"
         ).fetchone() == ("vector",)
@@ -160,9 +159,7 @@ def verify(observations: dict[str, object]) -> None:
     if candidate is None:
         raise ValueError("FACTORY_RUNTIME_CANDIDATE must identify this checkout")
     observations["candidate"] = candidate
-    with psycopg.connect(
-        database_url, connect_timeout=3, options="-c statement_timeout=5000"
-    ) as connection:
+    with connect(database_url) as connection:
         tables = connection.execute(
             "SELECT schemaname, tablename FROM pg_tables "
             "WHERE schemaname NOT IN ('pg_catalog', 'information_schema')"

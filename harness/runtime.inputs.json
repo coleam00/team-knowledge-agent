@@ -4,11 +4,14 @@
   "holdout": ".factory/holdout/HOLDOUT.md",
   "driver": "http",
   "http": {
-    "start": "",
-    "health_path": "/health",
-    "health_contains": "",
+    "start": "{python} -m app serve --port {port}",
+    "health_path": "/api/health",
+    "health_contains": "ok",
     "boot_timeout_s": 45,
-    "env": {}
+    "env": {
+      "TKA_MODELS": "fake",
+      "TKA_ALLOW_LOCAL_SOURCES": "1"
+    }
   },
   "cli": {
     "invoke": "",

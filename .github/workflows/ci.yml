@@ -1,0 +1,103 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  TKA_MODELS: fake
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: tka
+          POSTGRES_PASSWORD: tka_test_only
+          POSTGRES_DB: tka_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U tka -d tka_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://tka:tka_test_only@127.0.0.1:5432/tka_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: uv sync --frozen
+      - run: npm ci --prefix web
+      - run: uv run python scripts/check.py static
+      - run: uv run python scripts/check.py unit
+      - run: python harness/ci.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - run: npm run lint --prefix web
+      - run: npm run typecheck --prefix web
+      - run: npm test --prefix web
+      - run: npm run build --prefix web
+
+  smoke:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: tka
+          POSTGRES_PASSWORD: tka_test_only
+          POSTGRES_DB: tka_smoke
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U tka -d tka_smoke"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://tka:tka_test_only@127.0.0.1:5432/tka_smoke
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: uv sync --frozen
+      - run: npm ci --prefix web
+      - run: uv run python scripts/build_web.py
+      - name: Verify live app and restart
+        run: |
+          export FACTORY_RUNTIME_CANDIDATE="$(git rev-parse HEAD)"
+          uv run python scripts/smoke.py --output smoke-result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-observations
+          path: smoke-result.json

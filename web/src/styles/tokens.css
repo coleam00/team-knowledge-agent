@@ -1,0 +1,33 @@
+:root {
+  color-scheme: dark;
+  --background: #0e1116;
+  --text: #e6edf3;
+  --text-muted: #9aa4b2;
+  --font-body: 15px;
+  --font-heading: clamp(1.75rem, 5vw, 2.5rem);
+  --reading-width: 72ch;
+  --space-gutter: 1.5rem;
+  --space-page: clamp(3rem, 10vh, 7rem);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: var(--font-body);
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--background);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --background: #ffffff;
+    --text: #1f2328;
+    --text-muted: #59636e;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}

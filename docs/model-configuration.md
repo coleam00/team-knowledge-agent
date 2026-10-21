@@ -5,6 +5,9 @@ The default mode is `real`: startup and model factories refuse a missing, blank,
 or invalid `OPENROUTER_API_KEY`, naming the variable without printing its value.
 Supply the key only through the process environment. It is never a settings
 field, database value, or part of a public error.
+Model validation runs before data-directory resolution, so a storage configuration
+failure cannot hide a missing key, invalid mode, or blank model ID. Fake mode keeps
+the existing unhealthy-but-serving behavior for storage setup failures.
 
 | Environment variable | Real-mode default |
 | --- | --- |
@@ -43,7 +46,8 @@ there are no background timeout workers or live model calls.
 Failures use `ModelError` subclasses for authentication, timeout, availability,
 request rejection, and invalid response. Raw provider bodies and transport
 exceptions are not logged or chained into these errors. Responses echoing the
-API key are rejected, including JSON-escaped echoes. No provider request or
+API key are rejected, including JSON-escaped echoes and keys containing quotes or
+backslashes. No provider request or
 response is persisted. Fake mode never imports the provider or reads the key.
 
 The HTTPS transport uses the Python standard library, so production does not

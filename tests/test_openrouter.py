@@ -337,9 +337,17 @@ def test_model_validation_precedes_directory_resolution(
     monkeypatch: pytest.MonkeyPatch, variable: str, value: str
 ) -> None:
     monkeypatch.setenv("TKA_DATA_DIR", "~/data")
-    monkeypatch.setattr(
-        Path, "expanduser", Mock(side_effect=RuntimeError("No home directory"))
-    )
+    for name in ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"):
+        monkeypatch.delenv(name, raising=False)
+    # Reproduce the actual path-parser failure without replacing the parser.
+    # On Unix a passwd entry may still supply the home directory.
+    if sys.platform == "win32":
+        with pytest.raises(RuntimeError):
+            Path("~/data").expanduser()
+    else:
+        monkeypatch.setattr(
+            Path, "expanduser", Mock(side_effect=RuntimeError("No home directory"))
+        )
     monkeypatch.setenv(variable, value)
     migrate = Mock()
     monkeypatch.setattr(db, "run_migrations", migrate)

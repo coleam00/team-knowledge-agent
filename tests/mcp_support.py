@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -17,6 +18,7 @@ from mcp.os.win32.utilities import ServerProcess
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel
 
+from app import db
 from app.config import Settings
 from app.mcp import run_stdio
 from tests.conftest import local_event_loop
@@ -68,6 +70,19 @@ def child_environment(data_dir: Path) -> dict[str, str]:
     }
 
 
+def wait_for_storage_release(database_url: str | None) -> None:
+    directory = Path(os.environ["TKA_DATA_DIR"])
+    (directory / "initializing").touch()
+    try:
+        deadline = time.monotonic() + 10
+        while not (directory / "release").exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Test did not release initialization")
+            time.sleep(0.01)
+    finally:
+        (directory / "migration_closed").touch()
+
+
 @asynccontextmanager
 async def child_session(
     data_dir: Path,
@@ -99,7 +114,11 @@ async def child_session(
         cwd=ROOT,
     )
     try:
-        with patch.object(stdio, "_create_platform_compatible_process", capture):
+        # EOF waits for initialization, whose database timeouts exceed the SDK's 2s.
+        with (
+            patch.object(stdio, "_create_platform_compatible_process", capture),
+            patch.object(stdio, "PROCESS_TERMINATION_TIMEOUT", 10.0),
+        ):
             async with stdio.stdio_client(parameters) as streams:
                 async with ClientSession(*streams) as session:
                     yield session
@@ -115,7 +134,16 @@ async def child_session(
 
 if __name__ == "__main__":
     pytest_socket.disable_socket(allow_unix_socket=True)
-    with asyncio.Runner(loop_factory=local_event_loop) as runner:
+    with (
+        patch.object(
+            db,
+            "run_migrations",
+            wait_for_storage_release
+            if os.environ.get("TKA_TEST_MCP_BLOCK_INITIALIZATION") == "1"
+            else db.run_migrations,
+        ),
+        asyncio.Runner(loop_factory=local_event_loop) as runner,
+    ):
         runner.run(
             run_stdio(
                 register_services=register_lifecycle_services

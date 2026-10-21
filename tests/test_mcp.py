@@ -317,3 +317,35 @@ def test_stdio_registers_once_and_owns_runtime(monkeypatch: pytest.MonkeyPatch) 
         runner.run(run_stdio(register_services=registrar))
     registrar.assert_called_once()
     migration.assert_called_once()
+
+
+def test_stdio_eof_joins_pending_initialization(tmp_path: Path) -> None:
+    async def check() -> None:
+        closing, closed = anyio.Event(), anyio.Event()
+
+        async def client() -> None:
+            async with child_session(
+                tmp_path, extra_env={"TKA_TEST_MCP_BLOCK_INITIALIZATION": "1"}
+            ) as session:
+                await session.initialize()
+                while not (tmp_path / "initializing").exists():
+                    await anyio.sleep(0.01)
+                closing.set()
+            closed.set()
+
+        with anyio.fail_after(15):
+            async with anyio.create_task_group() as tasks:
+                tasks.start_soon(client)
+                await closing.wait()
+                try:
+                    with anyio.move_on_after(2.5) as timeout:
+                        await closed.wait()
+                    assert timeout.cancelled_caught
+                    assert not (tmp_path / "migration_closed").exists()
+                finally:
+                    (tmp_path / "release").touch()
+                await closed.wait()
+            assert (tmp_path / "migration_closed").exists()
+
+    with asyncio.Runner(loop_factory=local_event_loop) as runner:
+        runner.run(check())

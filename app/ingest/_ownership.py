@@ -1,4 +1,4 @@
-"""Own command descendants without application or workflow policy.
+"""Own Git command descendants for repository acquisition.
 
 Windows jobs contain descendants after the initial command exits. Unix commands
 must stay in the owned process group; daemonization is unsupported.

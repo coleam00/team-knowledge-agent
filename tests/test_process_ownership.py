@@ -8,8 +8,8 @@ from unittest.mock import Mock
 
 import pytest
 
-import process_ownership
-from process_ownership import ProcessTree
+from app.ingest import _ownership
+from app.ingest._ownership import ProcessTree
 
 
 def test_pollable_process_with_explicit_environment_and_output(tmp_path: Path) -> None:
@@ -78,10 +78,10 @@ def test_worker_launch_failure_closes_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     if sys.platform == "win32":
-        job = process_ownership._Job()
+        job = _ownership._Job()
         close = Mock(wraps=job.close)
         monkeypatch.setattr(job, "close", close)
-        monkeypatch.setattr(process_ownership, "_Job", lambda: job)
+        monkeypatch.setattr(_ownership, "_Job", lambda: job)
         monkeypatch.setattr(
             subprocess, "Popen", Mock(side_effect=OSError("worker launch failed"))
         )

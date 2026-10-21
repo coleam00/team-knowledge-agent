@@ -67,7 +67,8 @@ credentials out of source files and command output.
 | Variable | Current behavior |
 |---|---|
 | `DATABASE_URL` | Connection URL for the existing Postgres database. Required for readiness; unset or empty leaves health unavailable. Startup runs migrations, but never starts a database server. |
-| `TKA_DATA_DIR` | Data directory. A nonempty value takes precedence over `FACTORY_RUNTIME_STATE`, then `./.tka-data`. Relative paths use the working directory; `~` is expanded. Startup creates the directory; cloning is not built. |
+| `TKA_DATA_DIR` | Data directory. A nonempty value takes precedence over `FACTORY_RUNTIME_STATE`, then `./.tka-data`. Relative paths use the working directory; `~` is expanded. Startup creates the directory; the [acquisition library](docs/file-selection.md) stores source-specific clones beneath `repos/`. |
+| `TKA_ALLOW_LOCAL_SOURCES` | Set to exactly `1` to enable local Git sources in the acquisition library for tests and runtime checks; off by default. Source HTTP APIs are not built. |
 | `FACTORY_RUNTIME_STATE` | Data-directory fallback when `TKA_DATA_DIR` is unset or empty. An unset or empty fallback uses `./.tka-data`. |
 | `FACTORY_RUNTIME_CANDIDATE` | Exact build identity when set, including an empty value; otherwise the Git commit, then `unknown`, as described above. There is no `TKA_BUILD_ID` override. |
 | `TKA_MODELS` | Model-library mode, default `real`. Set `fake` for deterministic offline embeddings and a quoting answerer; no key is needed. Model factories reject unknown modes and raise `NotImplementedError` for `real` until providers are built. The current HTTP routes do not call the factories. Tests and runtime checks use `fake`. |
@@ -78,7 +79,6 @@ The following settings belong to later increments in [the runtime contract](docs
 |---|---|
 | `OPENROUTER_API_KEY` | Environment-only credential for future real-mode model calls. Not read by the current app; never supply it to CI or runtime checks. |
 | `TKA_CHAT_MODEL`, `TKA_EMBEDDING_MODEL` | Future OpenRouter model selection; not read by the current app. |
-| `TKA_ALLOW_LOCAL_SOURCES=1` | Future opt-in for local Git sources in tests and runtime checks, off by default. Source ingestion is not built, so this currently enables no source API. |
 
 ## Checks
 

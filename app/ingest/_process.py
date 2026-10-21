@@ -1,10 +1,10 @@
-"""Collect Git output under the shared process owner and an injected deadline."""
+"""Collect Git output under an owned process tree and an injected deadline."""
 
 import subprocess
 import tempfile
 from pathlib import Path
 
-from process_ownership import ProcessTree
+from ._ownership import ProcessTree
 
 
 def run_owned(

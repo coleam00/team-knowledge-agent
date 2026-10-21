@@ -17,11 +17,10 @@ def main() -> int:
         print("npm is required; install Node 22", file=sys.stderr)
         return 127
     python = sys.executable
-    python_paths = ["app", "scripts", "tests", "process_ownership.py"]
     commands = (
         [
-            [python, "-m", "ruff", "check", *python_paths],
-            [python, "-m", "ruff", "format", "--check", *python_paths],
+            [python, "-m", "ruff", "check", "."],
+            [python, "-m", "ruff", "format", "--check", "."],
             [python, "-m", "mypy"],
             [npm, "run", "lint", "--prefix", "web"],
             [npm, "run", "typecheck", "--prefix", "web"],

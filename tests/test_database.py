@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -66,6 +67,46 @@ def test_initialization_and_restart_keep_versions_and_timestamps(
             ).fetchall()
             == before
         )
+
+
+@pytest.mark.database
+def test_files_persist_with_source_path_uniqueness(database_url: str) -> None:
+    db.run_migrations(database_url)
+    source_id, other_source = uuid4(), uuid4()
+    records = [
+        (uuid4(), source_id, "docs/caf\u00e9.md", "a" * 40, "markdown"),
+        (uuid4(), other_source, "docs/caf\u00e9.md", "b" * 64, "markdown"),
+        (uuid4(), source_id, "src/keys.py", "c" * 40, "python"),
+    ]
+    insert = (
+        "INSERT INTO files (id, source_id, path, blob_sha, language) "
+        "VALUES (%s, %s, %s, %s, %s)"
+    )
+    with db.connect(database_url) as connection:
+        for record in records:
+            connection.execute(insert, record)
+    db.run_migrations(database_url)
+    with db.connect(database_url) as connection:
+        assert set(
+            connection.execute(
+                "SELECT id, source_id, path, blob_sha, language FROM files"
+            ).fetchall()
+        ) == set(records)
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            with connection.transaction():
+                connection.execute(insert, (uuid4(), *records[0][1:]))
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            with connection.transaction():
+                connection.execute(
+                    insert,
+                    (records[0][0], other_source, "new.md", "d" * 40, "markdown"),
+                )
+        for field in range(5):
+            missing: list[object] = [uuid4(), uuid4(), "new.md", "d" * 40, "markdown"]
+            missing[field] = None
+            with pytest.raises(psycopg.errors.NotNullViolation):
+                with connection.transaction():
+                    connection.execute(insert, missing)
 
 
 @pytest.mark.database

@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -9,13 +10,13 @@ from uuid import uuid4
 
 import pytest
 
-import process_ownership
 from app.config import Settings
 from app.ingest import (
     CloneLimits,
     CloneSelectError,
     SelectedFile,
     SourceSpec,
+    _ownership,
     _process,
     clone_and_select,
 )
@@ -252,6 +253,90 @@ def test_limits_and_failed_first_store_cleanup(
     assert error.value.code == "total_bytes_limit"
     assert (store(settings, source) / "source.json").read_bytes() == marker
     assert not store(settings, source).with_suffix(".lock").exists()
+
+
+def test_aggregate_limit_counts_utf8_bytes(
+    source: SourceSpec, settings: Settings
+) -> None:
+    contents = {"a.md": b"\xc3\xa9", "b.py": b"\xc3\xa9"}
+    replace_files(source, contents)
+    result = clone_and_select(source, settings=settings, limits=CloneLimits(2, 4, 30))
+    assert {
+        file.path: file.content.encode("utf-8") for file in result.files
+    } == contents
+    with pytest.raises(CloneSelectError) as error:
+        clone_and_select(source, settings=settings, limits=CloneLimits(2, 3, 30))
+    assert error.value.code == "total_bytes_limit"
+
+
+@pytest.mark.parametrize("reuse", [False, True])
+def test_local_commondir_cannot_read_external_objects(
+    source: SourceSpec, settings: Settings, tmp_path: Path, reuse: bool
+) -> None:
+    if reuse:
+        clone_and_select(source, settings=settings, limits=LIMITS)
+    external = create_handbook_repo(tmp_path)
+    (external / "README.md").write_bytes(b"external sentinel")
+    commit(external)
+    common = tmp_path / "common"
+    shutil.copytree(external / ".git", common, ignore=shutil.ignore_patterns("objects"))
+    link = common / "objects"
+    target = external / ".git/objects"
+    if os.name == "nt":
+        subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    try:
+        (Path(source.location) / ".git/commondir").write_text(
+            common.as_posix() + "\n", encoding="utf-8"
+        )
+        with pytest.raises(CloneSelectError) as error:
+            clone_and_select(source, settings=settings, limits=LIMITS)
+        assert error.value.code == "invalid_local_repository"
+        assert (external / "README.md").read_bytes() == b"external sentinel"
+    finally:
+        if os.name == "nt":
+            link.rmdir()
+        else:
+            link.unlink()
+
+
+def test_sha256_initial_retry_and_reuse(tmp_path: Path, settings: Settings) -> None:
+    repository = tmp_path / "sha256"
+    repository.mkdir()
+    git(repository, "init", "--object-format=sha256", "--template=")
+    git(repository, "config", "user.name", "Test")
+    git(repository, "config", "user.email", "test@example.invalid")
+    git(repository, "config", "commit.gpgsign", "false")
+    git(repository, "remote", "add", "origin", ORIGIN)
+    (repository / "README.md").write_bytes(b"sha256 content")
+    commit(repository)
+    source = SourceSpec(uuid4(), str(repository))
+    with pytest.raises(CloneSelectError) as error:
+        clone_and_select(source, settings=settings, limits=CloneLimits(1, 1, 30))
+    assert error.value.code == "total_bytes_limit"
+    assert list((settings.data_dir / "repos").iterdir()) == []
+    result = clone_and_select(source, settings=settings, limits=LIMITS)
+    assert result.repo_url == ORIGIN
+    assert result.source_id == source.source_id
+    assert result.commit_sha == git(repository, "rev-parse", "HEAD")
+    assert len(result.commit_sha) == 64
+    assert result.files == (
+        SelectedFile(
+            "README.md",
+            git(repository, "rev-parse", "HEAD:README.md"),
+            "markdown",
+            14,
+            "sha256 content",
+        ),
+    )
+    assert len(result.files[0].blob_sha) == 64
+    assert clone_and_select(source, settings=settings, limits=LIMITS) == result
 
 
 @pytest.mark.parametrize("value", [0, -1, True, 1.1, "2"])
@@ -917,7 +1002,7 @@ def test_failed_job_assignment_never_launches_command(
 ) -> None:
     if sys.platform == "win32":
         monkeypatch.setattr(
-            process_ownership._Job,
+            _ownership._Job,
             "assign",
             Mock(side_effect=OSError("assignment failed")),
         )

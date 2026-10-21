@@ -85,6 +85,7 @@ def _local_path(location: str, settings: Settings) -> Path:
         not git_dir.is_dir()
         or git_dir.is_symlink()
         or git_dir.is_junction()
+        or (git_dir / "commondir").exists()
         or (git_dir / "objects/info/alternates").exists()
         or (git_dir / "objects/info/http-alternates").exists()
     ):
@@ -122,6 +123,15 @@ def _local_origin(path: Path, runner: GitRunner) -> str:
         return canonical_url(values[0].decode("utf-8"))
     except (UnicodeDecodeError, CloneSelectError):
         raise CloneSelectError("invalid_local_repository") from None
+
+
+def _local_object_format(path: Path, runner: GitRunner) -> str:
+    value = runner.run(
+        "rev-parse", "--show-object-format", git_dir=path / ".git"
+    ).stdout.strip()
+    if value not in (b"sha1", b"sha256"):
+        raise CloneSelectError("invalid_local_repository")
+    return value.decode("ascii")
 
 
 def _acquire(
@@ -175,7 +185,16 @@ def _acquire(
                 tempfile.mkdtemp(prefix=f"{source.source_id.hex}-", dir=repositories)
             )
             storage = temporary
-            runner.run("init", "--bare", "--template=", str(storage / "repository.git"))
+            object_format = (
+                "sha1" if path is None else _local_object_format(path, runner)
+            )
+            runner.run(
+                "init",
+                "--bare",
+                "--template=",
+                f"--object-format={object_format}",
+                str(storage / "repository.git"),
+            )
         repository = storage / "repository.git"
         runner.run(
             "fetch",

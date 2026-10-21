@@ -32,12 +32,15 @@ Access is anonymous. Redirects are disabled; moved repos need their current URL.
 `Settings.allow_local_sources` defaults to false. `Settings.from_env()` enables
 it only for `TKA_ALLOW_LOCAL_SOURCES=1`. Enabled local sources must be absolute
 paths to normal non-bare repositories with an actual `.git` directory. Linked
-worktrees, symlinks/junctions anywhere in Git metadata, object alternate files,
+worktrees, common-directory redirection (`.git/commondir`), symlinks/junctions
+anywhere in Git metadata, object alternate files,
 config includes and `core.alternateRefsCommand` are rejected. The config must
 have exactly one public GitHub `remote.origin.url`, used only for citation
 metadata. Local acquisition never contacts that URL. Only committed HEAD is
 read; uncommitted working files are irrelevant. The storage root cannot be inside
 the source repository, and acquisition never writes to the input repository.
+Local SHA-1 and SHA-256 repositories are supported; bare storage is initialized
+with the validated source's object format. Public GitHub storage uses SHA-1.
 
 ## Non-execution boundary
 
@@ -67,9 +70,19 @@ Timeouts terminate and reap the owned command and terminate its descendants;
 cleanup is also performed on success and exceptions. Cleanup has its own bounded
 wait, so a 0.01-second command timeout is not a 10 ms wall-clock guarantee.
 
-`process_ownership.py` owns the platform lifecycle shared with the factory runtime
-host. Ingest keeps its Git environment, deadline, byte collection and error mapping.
-Runtime snapshots that include `app/` must also include `process_ownership.py`.
+The process lifecycle belongs to `app/ingest/`; application snapshots need only
+the application package. Protected factory infrastructure remains independent.
+
+## File-record schema
+
+Startup migration `0002_files.sql` creates `files(id, source_id, path, blob_sha,
+language)` in the configured Postgres database. IDs are UUIDs, all columns are
+required, and `(source_id, path)` is unique. The same path can belong to different
+sources, and blob IDs preserve either supported Git hash format as text.
+Source IDs are caller-owned, matching `SourceSpec`; there is no `sources` table
+yet, so this migration does not add a foreign key to a nonexistent registry.
+Acquisition returns metadata without writing rows. Worker persistence and source
+registration remain later increments; this schema supplies their file-record seam.
 
 ## Exact matching rules
 

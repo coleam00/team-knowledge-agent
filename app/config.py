@@ -7,6 +7,7 @@ from pathlib import Path
 class Settings:
     database_url: str | None = field(repr=False)
     data_dir: Path
+    models_mode: str = "real"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -18,4 +19,5 @@ class Settings:
         return cls(
             database_url=os.environ.get("DATABASE_URL") or None,
             data_dir=Path(directory).expanduser().resolve(),
+            models_mode=os.environ.get("TKA_MODELS", "real"),
         )

@@ -166,7 +166,7 @@ Pulled from Port on 2026-10-20 (read-only). Scorecard `factory_production_readin
 **Owner actions outside the factory's reach** (these files are protected or live in GitHub settings, so a human makes them):
 - Enable branch protection on `main` requiring the checks `backend`, `frontend` and `smoke` (currently not protected, verified 2026-10-20).
 - Set `harness/harness.config.json`: `static` = `python scripts/check.py static`, `unit` = `python scripts/check.py unit` (the harness runs one argv without a shell, so increment 1 ships `scripts/check.py`, which runs ruff, mypy, eslint and tsc for `static` and pytest and vitest for `unit`), `required_checks` = `backend,frontend,smoke`; add `CODEOWNERS` and `.github/**` to `protected_paths` so the factory cannot weaken its own standards files.
-- Set `harness/runtime.inputs.json` `http.start` to the start argv above and `health_path` to `/api/health` (it currently says `/health`, which this app does not serve), with `TKA_MODELS=fake` and `TKA_ALLOW_LOCAL_SOURCES=1` in `http.env`.
+- Done 2026-10-20: `harness/runtime.inputs.json` sets `http.start` to the start argv above, `health_path` to `/api/health`, and `TKA_MODELS=fake` and `TKA_ALLOW_LOCAL_SOURCES=1` in its http environment. The `harness/harness.config.json` commands and `required_checks` above are also set (as `uv run python scripts/check.py ...`).
 - Update the mutation copy list in `harness/mutations/defects.json` to `app`, `web`, `tests`, `scripts`, `harness`, `.factory`, `pyproject.toml`, `uv.lock`, and write the defect set.
 
 ## 9. Non-goals

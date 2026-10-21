@@ -5,7 +5,42 @@ from unittest.mock import Mock
 import pytest
 
 from app import build_id
-from app.config import Settings
+from app.config import ModelConfigurationError, Settings
+
+
+@pytest.mark.parametrize(("mode", "expected"), [("fake", 0.25), ("real", 0.35)])
+def test_similarity_defaults_and_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str, expected: float
+) -> None:
+    monkeypatch.setenv("TKA_MODELS", mode)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "dummy")
+    assert Settings(None, tmp_path, models_mode=mode).search_min_similarity == expected
+    assert Settings.from_env().search_min_similarity == expected
+    for value in [-1.0, 0.0, 0.8, 1.0]:
+        monkeypatch.setenv("TKA_MIN_SIMILARITY", str(value))
+        assert Settings.from_env().search_min_similarity == value
+        assert (
+            Settings(None, tmp_path, min_similarity=value).search_min_similarity
+            == value
+        )
+
+
+@pytest.mark.parametrize(
+    "value", ["", "secret-sentinel", "nan", "inf", "-inf", "1.01", "-1.01"]
+)
+def test_invalid_similarity_is_redacted(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("TKA_MIN_SIMILARITY", value)
+    with pytest.raises(ModelConfigurationError, match="TKA_MIN_SIMILARITY") as error:
+        Settings.from_env()
+    assert "secret-sentinel" not in str(error.value)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1.1, 1.1])
+def test_direct_similarity_validation(tmp_path: Path, value: float) -> None:
+    with pytest.raises(ModelConfigurationError, match="TKA_MIN_SIMILARITY"):
+        Settings(None, tmp_path, min_similarity=value)
 
 
 @pytest.mark.parametrize(

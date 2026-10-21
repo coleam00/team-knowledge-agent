@@ -19,6 +19,7 @@ def main() -> int:
     python = sys.executable
     commands = (
         [
+            [python, "-m", "scripts.citation_type", "--check"],
             [python, "-m", "ruff", "check", "."],
             [python, "-m", "ruff", "format", "--check", "."],
             [python, "-m", "mypy"],

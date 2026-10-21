@@ -105,3 +105,85 @@ def full_text_search(
             (query, source_id, source_id),
         )
         return [FullTextMatch.model_validate(row) for row in cursor.fetchall()]
+
+
+class SearchCandidate(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    source_id: UUID
+    owner: str
+    name: str
+    indexed_commit: str
+    path: str
+    start_line: PositiveInt
+    end_line: PositiveInt
+    content: str
+    fts_rank: PositiveInt | None
+    vector_rank: PositiveInt | None
+
+    @model_validator(mode="after")
+    def validate_ranks(self) -> "SearchCandidate":
+        if self.fts_rank is None and self.vector_rank is None:
+            raise ValueError("A candidate must belong to a ranked branch")
+        return self
+
+
+def hybrid_candidates(
+    connection: psycopg.Connection[TupleRow],
+    query: str,
+    *,
+    query_embedding: Sequence[float],
+    embedding_model: str,
+    min_similarity: float,
+    source_id: UUID | None = None,
+) -> list[SearchCandidate]:
+    # One statement binds ranking, content and commit to the same MVCC snapshot.
+    with connection.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(
+            """
+            WITH eligible AS MATERIALIZED (
+                SELECT c.*, s.owner, s.name, s.indexed_commit
+                FROM chunks c JOIN sources s ON s.id = c.source_id
+                WHERE (%(source)s::uuid IS NULL OR c.source_id = %(source)s)
+                  AND s.indexed_commit ~ '^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$'
+            ), lexical AS (
+                SELECT id, row_number() OVER (
+                    ORDER BY ts_rank_cd(tsv, q) DESC, id
+                ) AS fts_rank
+                FROM eligible, websearch_to_tsquery('english', %(query)s) q
+                WHERE tsv @@ q
+                ORDER BY fts_rank LIMIT 50
+            ), scored_vectors AS MATERIALIZED (
+                SELECT id, CASE
+                    WHEN embedding_model = %(model)s
+                     AND vector_dims(embedding) = vector_dims(%(vector)s::vector)
+                     AND vector_norm(embedding) > 0
+                     AND vector_norm(%(vector)s::vector) > 0
+                    THEN 1 - (embedding <=> %(vector)s::vector)
+                END AS similarity
+                FROM eligible
+            ), semantic AS (
+                SELECT id, row_number() OVER (
+                    ORDER BY similarity DESC, id
+                ) AS vector_rank
+                FROM scored_vectors WHERE similarity >= %(minimum)s
+                ORDER BY vector_rank LIMIT 50
+            ), ranked AS (
+                SELECT coalesce(l.id, v.id) AS id, l.fts_rank, v.vector_rank
+                FROM lexical l FULL JOIN semantic v ON l.id = v.id
+            )
+            SELECT e.id, e.source_id, e.owner, e.name, e.indexed_commit,
+                   e.path, e.start_line, e.end_line, e.content,
+                   r.fts_rank, r.vector_rank
+            FROM ranked r JOIN eligible e ON e.id = r.id
+            """,
+            {
+                "source": source_id,
+                "query": query,
+                "model": embedding_model,
+                "vector": json.dumps(list(query_embedding), allow_nan=False),
+                "minimum": min_similarity,
+            },
+        )
+        return [SearchCandidate.model_validate(row) for row in cursor.fetchall()]

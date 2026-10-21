@@ -2,10 +2,26 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
+import httpx
 import psycopg
 import pytest
 
 from scripts import smoke
+
+
+def test_absent_features_exclude_delivered_search() -> None:
+    paths: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        return httpx.Response(404)
+
+    with httpx.Client(
+        transport=httpx.MockTransport(respond), base_url="http://test"
+    ) as client:
+        observations = smoke.absent_features(client)
+    assert paths == ["/api/sources/1/reindex", "/api/ask", "/mcp"]
+    assert all(item["stage"] == "not yet built" for item in observations)
 
 
 @pytest.mark.parametrize("operation", ["ledger", "preflight"])

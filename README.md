@@ -5,11 +5,11 @@ Ask questions about your team's code and docs and get answers with citations. Bu
 ## Run it
 
 The app provides the application page, database migrations, health, build
-identity, and a persistent source registry. The storage library persists chunks
-and retrieves full-text matches. Background indexing, HTTP search, answers, and
+identity, a persistent source registry, and [hybrid search](docs/search.md) with
+commit-pinned citations over stored chunks. Background indexing, answers, and
 MCP are not built yet; accepted sources remain queued for a later worker.
 The model library provides deterministic fake embeddings and a quoting answerer.
-The app's HTTP routes do not call models yet. The [acquisition library](docs/file-selection.md)
+Search embeds each query with the active model. The [acquisition library](docs/file-selection.md)
 clones and selects commit-pinned text; registration does not yet invoke it.
 
 The pure [chunking library](docs/chunking.md) splits Markdown at headings and
@@ -82,10 +82,11 @@ credentials out of source files and command output.
 | `TKA_DATA_DIR` | Data directory. A nonempty value takes precedence over `FACTORY_RUNTIME_STATE`, then `./.tka-data`. Relative paths use the working directory; `~` is expanded. Startup creates the directory; the [acquisition library](docs/file-selection.md) stores source-specific clones beneath `repos/`. |
 | `FACTORY_RUNTIME_STATE` | Data-directory fallback when `TKA_DATA_DIR` is unset or empty. An unset or empty fallback uses `./.tka-data`. |
 | `FACTORY_RUNTIME_CANDIDATE` | Exact build identity when set, including an empty value; otherwise the Git commit, then `unknown`, as described above. There is no `TKA_BUILD_ID` override. |
-| `TKA_MODELS` | Model-library mode, default `real`, using OpenRouter adapters. Set `fake` for deterministic offline embeddings and a quoting answerer; no key is needed. Startup and model factories reject unknown modes. The current HTTP routes do not call models yet. Tests and runtime checks use `fake`. |
+| `TKA_MODELS` | Model mode, default `real`, using OpenRouter adapters. Set `fake` for deterministic offline embeddings and a quoting answerer; no key is needed. Search embeds queries with this mode. Startup and model factories reject unknown modes. Tests and runtime checks use `fake`. |
 | `OPENROUTER_API_KEY` | Environment-only credential required at real-mode startup and for model calls. A missing, blank, or invalid key causes `ModelConfigurationError` naming the variable without revealing its value. Fake mode does not read it; never supply it to CI or runtime checks. |
 | `TKA_CHAT_MODEL` | OpenRouter chat model, default `anthropic/claude-sonnet-5.5`. Overrides are sent exactly as provided; blank IDs are rejected at real-mode startup. |
 | `TKA_EMBEDDING_MODEL` | OpenRouter embedding model, default `openai/text-embedding-3-small`. Overrides are sent exactly as provided; blank IDs are rejected at real-mode startup. |
+| `TKA_MIN_SIMILARITY` | Inclusive search cosine threshold, default 0.25 in fake mode and 0.35 in real mode. Overrides must be finite in [-1, 1]. Full-text matches remain eligible independently. |
 | `TKA_ALLOW_LOCAL_SOURCES` | Exactly `1` enables absolute local Git repository roots for offline tests and runtime checks. Off by default. The repository must have a public GitHub HTTPS `origin` for owner/name metadata. |
 
 See [model configuration](docs/model-configuration.md) for validation, timeout/retry
@@ -147,13 +148,14 @@ Embeddings use pgvector's float32 precision and retain their model identity.
 Model IDs are opaque and stored unchanged. SQL and Python reject empty IDs and
 IDs containing only ASCII spaces (U+0020); other characters, including tabs and
 Unicode whitespace, remain significant, preserving the existing SQL domain.
-Lexical retrieval does not compare embeddings. Vector/hybrid ranking and ingestion
-integration remain future increments; there is no ANN index or model call here.
+The low-level lexical API does not compare embeddings or call a model. Public
+[hybrid search](docs/search.md) combines it with compatible exact cosine candidates
+and returns commit-pinned evidence. Ingestion integration remains a future increment.
 
 ## Checks
 
-With the locked dependencies installed and `DATABASE_URL` pointing to a dedicated
-test database:
+With the locked dependencies installed and `DATABASE_URL` (or the test-only
+fallback `TKA_TEST_DATABASE_URL`) pointing to a dedicated test database:
 
 ```text
 uv run python scripts/check.py static
@@ -176,8 +178,8 @@ uv run python -m scripts.smoke
 ```
 
 Smoke checks real HTTP responses and assets, the extension and migration ledger,
-source registration, commit-pinned file reads across edits/deletions/renames and
-restart persistence, absent future APIs, and
+source registration, seeded hybrid citations, commit-pinned file reads across
+edits/deletions/renames, restart persistence for both APIs, absent future APIs, and
 missing-database health. It creates
 and cleans its own temporary data directory and app processes. It leaves the
 supplied database migrated. `--output PATH` also saves the observations as JSON.

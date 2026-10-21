@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from app import db
 from app.build_id import resolve_build_id
 from app.config import ModelConfigurationError, Settings
+from app.search import search_router
 from app.sources import source_router
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -67,12 +68,13 @@ def create_app() -> FastAPI:
             },
         )
 
-    def source_settings() -> Settings:
+    def storage_settings() -> Settings:
         if not ready or settings is None:
-            raise HTTPException(503, "Source storage is unavailable")
+            raise HTTPException(503, "Storage is unavailable")
         return settings
 
-    application.include_router(source_router(source_settings))
+    application.include_router(source_router(storage_settings))
+    application.include_router(search_router(storage_settings))
 
     @application.get("/api/health")
     def health() -> JSONResponse:

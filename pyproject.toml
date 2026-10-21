@@ -1,0 +1,39 @@
+[project]
+name = "team-knowledge-agent"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "psycopg[binary]>=3.2,<4",
+    "uvicorn>=0.34,<1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28,<1",
+    "mypy>=1.15,<2",
+    "pytest>=8.3,<10",
+    "pytest-socket>=0.7,<1",
+    "ruff>=0.11,<1",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+include = ["app/**/*.py", "scripts/**/*.py", "tests/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["app", "scripts", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--disable-socket --allow-unix-socket"
+markers = ["database: integration against the supplied dedicated Postgres database"]

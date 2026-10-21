@@ -19,3 +19,11 @@ harness/.results/
 *.pem
 secrets.json
 credentials.json
+.venv/
+node_modules/
+app/static/
+web/dist/
+.tka-data/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

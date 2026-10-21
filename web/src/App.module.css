@@ -1,0 +1,16 @@
+.page {
+  max-width: var(--reading-width);
+  margin-inline: auto;
+  padding: var(--space-page) var(--space-gutter);
+}
+
+.page h1 {
+  margin: 0 0 var(--space-gutter);
+  font-size: var(--font-heading);
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.description {
+  color: var(--text-muted);
+}

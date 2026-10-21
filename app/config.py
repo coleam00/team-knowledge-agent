@@ -23,6 +23,7 @@ class Settings:
     models_mode: str = "real"
     chat_model: str = "anthropic/claude-sonnet-5.5"
     embedding_model: str = "openai/text-embedding-3-small"
+    allow_local_sources: bool = False
 
     def validate_models(self) -> None:
         if self.models_mode not in {"fake", "real"}:
@@ -47,6 +48,7 @@ class Settings:
             models_mode=os.environ.get("TKA_MODELS", "real"),
             chat_model=os.environ.get("TKA_CHAT_MODEL", cls.chat_model),
             embedding_model=os.environ.get("TKA_EMBEDDING_MODEL", cls.embedding_model),
+            allow_local_sources=os.environ.get("TKA_ALLOW_LOCAL_SOURCES") == "1",
         )
         settings.validate_models()
         return replace(settings, data_dir=settings.data_dir.expanduser().resolve())

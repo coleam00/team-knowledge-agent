@@ -36,6 +36,7 @@ def isolated_environment(
     monkeypatch.delenv("FACTORY_RUNTIME_STATE", raising=False)
     monkeypatch.delenv("FACTORY_RUNTIME_CANDIDATE", raising=False)
     monkeypatch.delenv("TKA_BUILD_ID", raising=False)
+    monkeypatch.delenv("TKA_ALLOW_LOCAL_SOURCES", raising=False)
     if request.node.get_closest_marker("database") is None:
         monkeypatch.delenv("DATABASE_URL", raising=False)
 

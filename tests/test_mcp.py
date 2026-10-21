@@ -134,14 +134,15 @@ def test_protocol_is_available_during_storage_startup(
         runner.run(check())
 
 
-def test_exact_path_and_host_origin_protection() -> None:
+@pytest.mark.parametrize("origin", ["http://127.0.0.1", "http://127.0.0.1:8765"])
+def test_exact_path_and_host_origin_protection(origin: str) -> None:
     application = main.create_app()
 
     async def check() -> None:
         async with application.router.lifespan_context(application):
             async with httpx2.AsyncClient(
                 transport=httpx2.ASGITransport(app=application),
-                base_url="http://127.0.0.1:8765",
+                base_url=origin,
             ) as client:
                 message = {
                     "jsonrpc": "2.0",
@@ -153,7 +154,10 @@ def test_exact_path_and_host_origin_protection() -> None:
                         "clientInfo": {"name": "test", "version": "1"},
                     },
                 }
-                headers = {"Accept": "application/json, text/event-stream"}
+                headers = {
+                    "Accept": "application/json, text/event-stream",
+                    "Origin": origin,
+                }
                 response = await client.post("/mcp", json=message, headers=headers)
                 assert response.status_code == 200 and not response.history
                 assert response.json()["result"]["serverInfo"]["name"]

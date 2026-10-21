@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.routing import Route
 
 from app.config import Settings
@@ -24,6 +25,26 @@ def install(
         streamable_http_path="/mcp",
         stateless_http=True,
         json_response=True,
+        # HTTP clients omit the default port from Host and Origin headers.
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=[
+                "127.0.0.1",
+                "127.0.0.1:*",
+                "localhost",
+                "localhost:*",
+                "[::1]",
+                "[::1]:*",
+            ],
+            allowed_origins=[
+                "http://127.0.0.1",
+                "http://127.0.0.1:*",
+                "http://localhost",
+                "http://localhost:*",
+                "http://[::1]",
+                "http://[::1]:*",
+            ],
+        ),
     )
 
     @asynccontextmanager

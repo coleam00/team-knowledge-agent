@@ -11,13 +11,6 @@ import sys
 import time
 from pathlib import Path
 
-if __name__ == "__main__":
-    if sys.stdin.buffer.read(1) != b"1":
-        raise SystemExit(1)
-    child = subprocess.Popen(sys.argv[1:], stdin=subprocess.DEVNULL, shell=False)
-    raise SystemExit(child.wait())
-
-
 if sys.platform == "win32":
     import ctypes as c
     from ctypes import wintypes as w
@@ -54,6 +47,17 @@ if sys.platform == "win32":
             ("terminated", w.DWORD),
         ]
 
+    class _ThreadEntry(c.Structure):
+        _fields_ = [
+            ("size", w.DWORD),
+            ("usage", w.DWORD),
+            ("thread_id", w.DWORD),
+            ("process_id", w.DWORD),
+            ("base_priority", w.LONG),
+            ("delta_priority", w.LONG),
+            ("flags", w.DWORD),
+        ]
+
     class _Job:
         def __init__(self) -> None:
             self.kernel = c.WinDLL("kernel32", use_last_error=True)
@@ -73,6 +77,11 @@ if sys.platform == "win32":
                     w.BOOL,
                 ),
                 ("CloseHandle", [w.HANDLE], w.BOOL),
+                ("CreateToolhelp32Snapshot", [w.DWORD, w.DWORD], w.HANDLE),
+                ("Thread32First", [w.HANDLE, c.c_void_p], w.BOOL),
+                ("Thread32Next", [w.HANDLE, c.c_void_p], w.BOOL),
+                ("OpenThread", [w.DWORD, w.BOOL, w.DWORD], w.HANDLE),
+                ("ResumeThread", [w.HANDLE], w.DWORD),
             ]:
                 function = getattr(self.kernel, name)
                 function.argtypes = arguments
@@ -98,6 +107,32 @@ if sys.platform == "win32":
             finally:
                 if handle:
                     self.kernel.CloseHandle(handle)
+
+        def resume(self, pid: int) -> None:
+            # Popen closes CreateProcess's primary thread handle. The suspended
+            # process has exactly one thread; reopen it using the documented API.
+            snapshot = self.kernel.CreateToolhelp32Snapshot(0x00000004, 0)
+            if snapshot in (None, c.c_void_p(-1).value):
+                raise OSError("Cannot enumerate suspended process thread")
+            try:
+                entry = _ThreadEntry()
+                entry.size = c.sizeof(entry)
+                found = self.kernel.Thread32First(snapshot, c.byref(entry))
+                while found:
+                    if entry.process_id == pid:
+                        thread = self.kernel.OpenThread(0x0002, False, entry.thread_id)
+                        if not thread:
+                            raise OSError("Cannot open suspended process thread")
+                        try:
+                            if self.kernel.ResumeThread(thread) != 1:
+                                raise OSError("Cannot resume owned process")
+                            return
+                        finally:
+                            self.kernel.CloseHandle(thread)
+                    found = self.kernel.Thread32Next(snapshot, c.byref(entry))
+                raise OSError("Suspended process thread not found")
+            finally:
+                self.kernel.CloseHandle(snapshot)
 
         def close(self) -> None:
             try:
@@ -135,26 +170,33 @@ class ProcessTree:
         else:
             self.job = None
         try:
-            # A Windows venv launcher spawns the real Python before assignment;
-            # assigning that launcher does not capture its existing descendant.
-            # This stdlib-only bootstrap must run the base interpreter directly.
-            # It cannot launch the command before ownership and the handshake.
-            self.proc = subprocess.Popen(
-                [
-                    getattr(sys, "_base_executable", sys.executable),
-                    "-I",
-                    str(Path(__file__).resolve()),
-                    *argv,
-                ],
-                cwd=cwd,
-                env=env,
-                stdin=subprocess.PIPE,
-                stdout=stdout,
-                stderr=stderr,
-                shell=False,
-                close_fds=True,
-                start_new_session=os.name != "nt",
-            )
+            if sys.platform == "win32":
+                # Assign before *any* code runs, including a venv launcher. Job
+                # assignment cannot retroactively capture existing descendants.
+                self.proc = subprocess.Popen(
+                    argv,
+                    cwd=cwd,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout,
+                    stderr=stderr,
+                    shell=False,
+                    close_fds=True,
+                    creationflags=0x00000004,  # CREATE_SUSPENDED
+                )
+            else:
+                # The Unix session leader waits for the ownership handshake.
+                self.proc = subprocess.Popen(
+                    [sys.executable, "-I", str(Path(__file__).resolve()), *argv],
+                    cwd=cwd,
+                    env=env,
+                    stdin=subprocess.PIPE,
+                    stdout=stdout,
+                    stderr=stderr,
+                    shell=False,
+                    close_fds=True,
+                    start_new_session=True,
+                )
         except BaseException:
             if self.job is not None:
                 self.job.close()
@@ -162,9 +204,11 @@ class ProcessTree:
         try:
             if self.job is not None:
                 self.job.assign(self.proc.pid)
-            assert self.proc.stdin is not None
-            self.proc.stdin.write(b"1")
-            self.proc.stdin.close()
+                self.job.resume(self.proc.pid)
+            else:
+                assert self.proc.stdin is not None
+                self.proc.stdin.write(b"1")
+                self.proc.stdin.close()
         except BaseException:
             self.close()
             raise
@@ -189,3 +233,10 @@ class ProcessTree:
                 if self.proc.stdin is not None and not self.proc.stdin.closed:
                     self.proc.stdin.close()
                 self.closed = True
+
+
+if __name__ == "__main__":
+    if sys.stdin.buffer.read(1) != b"1":
+        raise SystemExit(1)
+    child = subprocess.Popen(sys.argv[1:], stdin=subprocess.DEVNULL, shell=False)
+    raise SystemExit(child.wait())

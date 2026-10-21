@@ -1,4 +1,3 @@
-import math
 import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -32,18 +31,15 @@ class Settings:
     chunk_overlap_lines: int = 10
 
     def validate_ingest(self) -> None:
-        for value in (
+        from app.ingest.contracts import CloneLimits
+
+        CloneLimits(
             self.ingest_max_files,
             self.ingest_max_total_bytes,
-            self.chunk_window_lines,
-        ):
-            if type(value) is not int or value <= 0:
-                raise ValueError(
-                    "Ingest limits and chunk window must be positive integers"
-                )
-        timeout = self.ingest_command_timeout_seconds
-        if isinstance(timeout, bool) or not math.isfinite(timeout) or timeout <= 0:
-            raise ValueError("Ingest timeout must be positive and finite")
+            self.ingest_command_timeout_seconds,
+        )
+        if type(self.chunk_window_lines) is not int or self.chunk_window_lines <= 0:
+            raise ValueError("Chunk window must be a positive integer")
         if (
             type(self.chunk_overlap_lines) is not int
             or not 0 <= self.chunk_overlap_lines < self.chunk_window_lines

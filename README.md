@@ -6,7 +6,8 @@ Ask questions about your team's code and docs and get answers with citations. Bu
 
 The first increment provides the application page, database migrations, health,
 and build identity. Sources, indexing, search, answers, and MCP are not built yet.
-No models are called, including in `TKA_MODELS=fake` mode.
+The model library provides deterministic fake embeddings and a quoting answerer.
+The app's HTTP routes do not call models yet; real model providers are not built.
 
 Install Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 22 LTS (22.13 or
 newer), and Git. Run these commands from the checkout root:
@@ -69,12 +70,12 @@ credentials out of source files and command output.
 | `TKA_DATA_DIR` | Data directory. A nonempty value takes precedence over `FACTORY_RUNTIME_STATE`, then `./.tka-data`. Relative paths use the working directory; `~` is expanded. Startup creates the directory; cloning is not built. |
 | `FACTORY_RUNTIME_STATE` | Data-directory fallback when `TKA_DATA_DIR` is unset or empty. An unset or empty fallback uses `./.tka-data`. |
 | `FACTORY_RUNTIME_CANDIDATE` | Exact build identity when set, including an empty value; otherwise the Git commit, then `unknown`, as described above. There is no `TKA_BUILD_ID` override. |
+| `TKA_MODELS` | Model-library mode, default `real`. Set `fake` for deterministic offline embeddings and a quoting answerer; no key is needed. Model factories reject unknown modes and raise `NotImplementedError` for `real` until providers are built. The current HTTP routes do not call the factories. Tests and runtime checks use `fake`. |
 
 The following settings belong to later increments in [the runtime contract](docs/prd.md#4-stack-and-runtime-contract-decided):
 
 | Variable | Planned use and availability |
 |---|---|
-| `TKA_MODELS=fake` | Deterministic fake embeddings and answers for tests and runtime checks. The check runner already sets it; the current app has no model layer and calls no models in any mode. |
 | `OPENROUTER_API_KEY` | Environment-only credential for future real-mode model calls. Not read by the current app; never supply it to CI or runtime checks. |
 | `TKA_CHAT_MODEL`, `TKA_EMBEDDING_MODEL` | Future OpenRouter model selection; not read by the current app. |
 | `TKA_ALLOW_LOCAL_SOURCES=1` | Future opt-in for local Git sources in tests and runtime checks, off by default. Source ingestion is not built, so this currently enables no source API. |

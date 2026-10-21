@@ -128,7 +128,7 @@ All release-1 questions are answered (see Decisions). New ones go here. These ar
 ## Decisions
 
 - 2026-10-21 **Q2: default real-mode models?** Chat `anthropic/claude-sonnet-5.5`, embeddings `openai/text-embedding-3-small`, both through OpenRouter and overridable with `TKA_CHAT_MODEL` / `TKA_EMBEDDING_MODEL` (as PRD 4.3).
-- 2026-10-21 **Q3: per-repo ingest limits?** At most 5,000 indexable files, 200 MB of selected text, 1 MB per file (PRD), and a 120 s clone timeout; past a limit the source ends `failed` with a message naming the limit. All configurable.
+- 2026-10-21 **Q3: per-repo ingest limits?** Repo-wide limits: at most 5,000 indexable files, 200 MB of selected text, and a 120 s clone timeout; exceeding one of these ends the source `failed` with a message naming the limit. A single file over 1 MB is **skipped**, not a failure (PRD file selection), like binary and vendored files. All configurable. (Clarified 2026-10-21: the earlier wording wrongly listed the per-file size as a failure limit.)
 - 2026-10-21 **Q4: scheduled re-index?** No. Release 1 re-indexes only on request (the Re-index button and API).
 - 2026-10-21 **Q5: branches other than the default?** No. Release 1 always indexes the default branch.
 - 2026-10-21 **Q6: real-mode relevance threshold?** Cosine similarity 0.35 (fake mode 0.25), or any full-text match, as PRD 4.3; configurable with `TKA_MIN_SIMILARITY`.

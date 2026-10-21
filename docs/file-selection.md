@@ -8,8 +8,9 @@ this API.
 Pass `SourceSpec(source_id: UUID, location: str)`, `Settings`, and
 `CloneLimits(max_files, max_total_bytes, subprocess_timeout_seconds)`. All limits
 are required: positive integer counts/bytes and a positive finite timeout, with
-booleans rejected. These are caller-supplied policies, **not approved production
-cap defaults** (MISSION Q3 remains open).
+booleans rejected. The production defaults are the owner-approved MISSION Q3 decision
+(2026-10-21): at most 5,000 indexable files, 200 MB of selected text, 1 MB per file and
+a 120 s clone timeout, all configurable; callers pass them in as `CloneLimits`.
 
 The frozen `SelectionResult` contains the source UUID, canonical `repo_url`, one
 resolved `commit_sha`, and a tuple of `SelectedFile` values sorted by exact path.

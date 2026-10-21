@@ -18,6 +18,7 @@ from pydantic import BaseModel, NonNegativeInt, StrictStr
 from app import db
 from app.config import Settings
 from app.git import git
+from app.source_files import SourceFile, SourceFileError, fetch_source_file
 
 
 class SourceInput(BaseModel):
@@ -166,5 +167,28 @@ def source_router(get_settings: Callable[[], Settings]) -> APIRouter:
                 if row is None:
                     raise HTTPException(404, "Source not found")
                 return Source.model_validate(row)
+
+    @router.get("/{source_id}/file", response_model=SourceFile)
+    def get_file(
+        source_id: UUID,
+        settings: Annotated[Settings, Depends(get_settings)],
+        path: str | None = None,
+        start: int | None = None,
+        end: int | None = None,
+    ) -> SourceFile:
+        try:
+            return fetch_source_file(
+                source_id, path=path, start=start, end=end, settings=settings
+            )
+        except SourceFileError as error:
+            status = {
+                "not_found": 404,
+                "invalid_path": 422,
+                "invalid_range": 422,
+                "unavailable": 503,
+                "busy": 503,
+            }[error.code]
+            headers = {"Retry-After": "1"} if error.code == "busy" else None
+            raise HTTPException(status, str(error), headers=headers) from None
 
     return router

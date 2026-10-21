@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from .contracts import CloneLimits, CloneSelectError, SelectedFile
@@ -47,7 +48,7 @@ _LANGUAGES = {
 _BINARY_CONTROLS = bytes([*range(9), 11, *range(14, 32), 127])
 
 
-def path_language(path: str) -> str | None:
+def valid_path(path: str) -> bool:
     if (
         not path
         or "\\" in path
@@ -59,10 +60,18 @@ def path_language(path: str) -> str | None:
         )
         or any(ord(char) < 32 or ord(char) == 127 for char in path)
     ):
+        return False
+    try:
+        path.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return not any(part in {"", ".", ".."} for part in path.split("/"))
+
+
+def path_language(path: str) -> str | None:
+    if not valid_path(path):
         return None
     parts = path.lower().split("/")
-    if any(part in {"", ".", ".."} for part in parts):
-        return None
     if any(part in _DIRECTORIES for part in parts[:-1]):
         return None
     name = parts[-1]
@@ -71,6 +80,57 @@ def path_language(path: str) -> str | None:
     ):
         return None
     return "text" if name == "readme" else _LANGUAGES.get(PurePosixPath(name).suffix)
+
+
+@dataclass(frozen=True)
+class TreeFile:
+    path: str
+    blob_sha: str
+    language: str
+    size_bytes: int
+
+
+def eligible_record(record: bytes) -> TreeFile | None:
+    try:
+        metadata, raw_path = record.split(b"\t", 1)
+        mode, kind, blob, raw_size = metadata.split()
+    except ValueError:
+        raise CloneSelectError("git_failed") from None
+    if mode not in (b"100644", b"100755") or kind != b"blob":
+        return None
+    try:
+        path = raw_path.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    language = path_language(path)
+    if language is None:
+        return None
+    try:
+        size = int(raw_size)
+    except ValueError:
+        raise CloneSelectError("git_failed") from None
+    if size < 0:
+        raise CloneSelectError("git_failed")
+    if size > MAX_FILE_BYTES:
+        return None
+    return TreeFile(path, object_id(blob), language, size)
+
+
+def read_blob(
+    runner: GitRunner, repository: Path, file: TreeFile
+) -> SelectedFile | None:
+    data = runner.run("cat-file", "blob", file.blob_sha, git_dir=repository).stdout
+    if len(data) != file.size_bytes:
+        raise CloneSelectError("git_failed")
+    if any(char in data for char in _BINARY_CONTROLS):
+        return None
+    try:
+        content = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return SelectedFile(
+        file.path, file.blob_sha, file.language, file.size_bytes, content
+    )
 
 
 def select_files(
@@ -85,42 +145,16 @@ def select_files(
     for record in tree.split(b"\0"):
         if not record:
             continue
-        try:
-            metadata, raw_path = record.split(b"\t", 1)
-            mode, kind, blob, raw_size = metadata.split()
-        except ValueError:
-            raise CloneSelectError("git_failed") from None
-        if mode not in (b"100644", b"100755") or kind != b"blob":
+        entry = eligible_record(record)
+        if entry is None:
             continue
-        try:
-            path = raw_path.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
-        language = path_language(path)
-        if language is None:
-            continue
-        try:
-            size = int(raw_size)
-        except ValueError:
-            raise CloneSelectError("git_failed") from None
-        if size < 0:
-            raise CloneSelectError("git_failed")
-        if size > MAX_FILE_BYTES:
-            continue
-        blob_sha = object_id(blob)
-        data = runner.run("cat-file", "blob", blob_sha, git_dir=repository).stdout
-        if len(data) != size:
-            raise CloneSelectError("git_failed")
-        if any(char in data for char in _BINARY_CONTROLS):
-            continue
-        try:
-            content = data.decode("utf-8")
-        except UnicodeDecodeError:
+        file = read_blob(runner, repository, entry)
+        if file is None:
             continue
         if len(selected) == limits.max_files:
             raise CloneSelectError("file_count_limit")
-        total_bytes += size
+        total_bytes += file.size_bytes
         if total_bytes > limits.max_total_bytes:
             raise CloneSelectError("total_bytes_limit")
-        selected.append(SelectedFile(path, blob_sha, language, size, content))
+        selected.append(file)
     return tuple(sorted(selected, key=lambda file: file.path))

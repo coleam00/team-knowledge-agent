@@ -99,6 +99,15 @@ limits, and error behavior.
 array of sources in creation order; `GET /api/sources/{id}` returns one source
 or 404 for an unknown UUID.
 
+`GET /api/sources/{id}/file?path=docs/deploy.md&start=14&end=18` returns
+exact inclusive lines at the persisted `indexed_commit`, with the commit, path,
+actual line bounds and total line count. Omit the range for the whole file.
+Reads use eligible cached Git blobs and never fetch upstream or read working
+files. Missing indexed content returns 404; unsafe paths or invalid ranges return
+422. Registration remains queued and does not create indexed content.
+See the [source file contract](docs/source-files.md) for ranges, eligibility,
+storage safety, concurrency and the shared service used by future adapters.
+
 GitHub URLs are case insensitive; an optional `.git` suffix and trailing slash
 normalize to the same URL. Duplicates return 409 with `detail` and the existing
 `id`, including simultaneous submissions. Invalid inputs return 422 with a reason.
@@ -139,7 +148,8 @@ uv run python -m scripts.smoke
 ```
 
 Smoke checks real HTTP responses and assets, the extension and migration ledger,
-source registration and restart persistence, absent future APIs, and
+source registration, commit-pinned file reads across edits/deletions/renames and
+restart persistence, absent future APIs, and
 missing-database health. It creates
 and cleans its own temporary data directory and app processes. It leaves the
 supplied database migrated. `--output PATH` also saves the observations as JSON.

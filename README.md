@@ -8,6 +8,11 @@ The first increment provides the application page, database migrations, health,
 and build identity. Sources, indexing, search, answers, and MCP are not built yet.
 No models are called, including in `TKA_MODELS=fake` mode.
 
+The model interfaces also provide configurable OpenRouter adapters. Real mode
+(the default) requires `OPENROUTER_API_KEY` at startup; use `TKA_MODELS=fake` for
+offline development and checks. See [model configuration](docs/model-configuration.md)
+for model overrides, timeout/retry limits, and error behavior.
+
 Install Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 22 LTS (22.13 or
 newer), and Git. Run these commands from the checkout root:
 

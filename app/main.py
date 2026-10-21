@@ -22,6 +22,8 @@ def create_app() -> FastAPI:
     except (OSError, RuntimeError, ValueError) as error:
         logger.error("Configuration failed (%s)", type(error).__name__)
         settings = None
+    if settings is not None:
+        settings.validate_models()
     build_id = resolve_build_id()
     ready = False
 

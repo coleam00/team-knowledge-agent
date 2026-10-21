@@ -29,12 +29,14 @@ def isolated_environment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, request: pytest.FixtureRequest
 ) -> None:
     monkeypatch.setenv("TKA_MODELS", "fake")
-    monkeypatch.delenv("TKA_ALLOW_LOCAL_SOURCES", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("TKA_CHAT_MODEL", raising=False)
+    monkeypatch.delenv("TKA_EMBEDDING_MODEL", raising=False)
     monkeypatch.setenv("TKA_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.delenv("FACTORY_RUNTIME_STATE", raising=False)
     monkeypatch.delenv("FACTORY_RUNTIME_CANDIDATE", raising=False)
     monkeypatch.delenv("TKA_BUILD_ID", raising=False)
+    monkeypatch.delenv("TKA_ALLOW_LOCAL_SOURCES", raising=False)
     if request.node.get_closest_marker("database") is None:
         monkeypatch.delenv("DATABASE_URL", raising=False)
 

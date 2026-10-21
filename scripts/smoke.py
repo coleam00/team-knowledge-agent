@@ -14,6 +14,8 @@ from pathlib import Path
 import httpx
 
 from app.db import MIGRATIONS, connect, migration_files
+from app.sources import Source
+from tests.handbook import create_handbook_repo
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -121,8 +123,6 @@ def inspect_page(client: httpx.Client) -> list[dict[str, object]]:
 def absent_features(client: httpx.Client) -> list[dict[str, object]]:
     observations: list[dict[str, object]] = []
     for method, path in [
-        ("GET", "/api/sources"),
-        ("POST", "/api/sources"),
         ("POST", "/api/sources/1/reindex"),
         ("GET", "/api/search?q=deploy"),
         ("POST", "/api/ask"),
@@ -134,6 +134,28 @@ def absent_features(client: httpx.Client) -> list[dict[str, object]]:
             {"method": method, "path": path, "status": 404, "stage": "not yet built"}
         )
     return observations
+
+
+def register_handbook(client: httpx.Client, state: Path) -> Source:
+    repository = create_handbook_repo(state)
+    response = client.post("/api/sources", json={"url": str(repository)})
+    assert response.status_code == 202
+    source = Source.model_validate(response.json())
+    assert source.status == "queued"
+    assert source.owner == "tka-fixtures" and source.name == "handbook"
+    assert source.file_count == source.chunk_count == 0
+    assert source.indexed_commit is None
+    assert source.indexed_at is None
+    assert source.error is None
+    assert client.get(f"/api/sources/{source.id}").json() == response.json()
+    duplicate = client.post("/api/sources", json={"url": str(repository)})
+    assert duplicate.status_code == 409
+    assert duplicate.json()["id"] == str(source.id)
+    invalid = client.post(
+        "/api/sources", json={"url": "https://gitlab.com/acme/handbook"}
+    )
+    assert invalid.status_code == 422
+    return source
 
 
 def ledger(database_url: str) -> list[dict[str, object]]:
@@ -188,6 +210,18 @@ def verify(observations: dict[str, object]) -> None:
                 "body": client.get("/api/build-id").text,
             }
             observations["assets"] = inspect_page(client)
+            assert client.get("/api/sources").json() == []
+            source = register_handbook(client, Path(state))
+            second = register_handbook(client, Path(state))
+            assert source.id != second.id
+            sources = [item.model_dump(mode="json") for item in (source, second)]
+            assert client.get("/api/sources").json() == sources
+            observations["sources_before_restart"] = sources
+            observations["source_before_restart"] = source.model_dump(mode="json")
+            observations["indexing"] = {
+                "stage": "not yet built",
+                "observed_status": source.status,
+            }
             observations["unbuilt_features"] = absent_features(client)
             before = ledger(database_url)
             observations["ledger_before_restart"] = before
@@ -196,6 +230,13 @@ def verify(observations: dict[str, object]) -> None:
             after = ledger(database_url)
             assert after == before
             observations["ledger_after_restart"] = after
+            persisted = client.get(f"/api/sources/{source.id}")
+            assert persisted.status_code == 200
+            assert persisted.json() == source.model_dump(mode="json")
+            persisted_sources = client.get("/api/sources").json()
+            assert persisted_sources == sources
+            observations["sources_after_restart"] = persisted_sources
+            observations["source_after_restart"] = persisted.json()
         environment.pop("DATABASE_URL", None)
         with running_app(environment, observations, "missing_database") as (
             process,

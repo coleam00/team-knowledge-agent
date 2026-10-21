@@ -4,13 +4,20 @@ Ask questions about your team's code and docs and get answers with citations. Bu
 
 ## Run it
 
-The first increment provides the application page, database migrations, health,
-and build identity. Sources, indexing, search, answers, and MCP are not built yet.
+The app provides the application page, database migrations, health, build
+identity, and a persistent source registry. Indexing, search, answers, and MCP
+are not built yet; accepted sources remain queued for a later worker.
 The model library provides deterministic fake embeddings and a quoting answerer.
-The app's HTTP routes do not call models yet; real model providers are not built.
+The app's HTTP routes do not call models yet. The [acquisition library](docs/file-selection.md)
+clones and selects commit-pinned text; registration does not yet invoke it.
+
+The model interfaces also provide configurable OpenRouter adapters. Real mode
+(the default) requires `OPENROUTER_API_KEY` at startup; use `TKA_MODELS=fake` for
+offline development and checks. See [model configuration](docs/model-configuration.md)
+for model overrides, timeout/retry limits, and error behavior.
 
 Install Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 22 LTS (22.13 or
-newer), and Git. Run these commands from the checkout root:
+newer), and Git 2.47 or newer. Run these commands from the checkout root:
 
 ```text
 uv sync --frozen
@@ -68,17 +75,39 @@ credentials out of source files and command output.
 |---|---|
 | `DATABASE_URL` | Connection URL for the existing Postgres database. Required for readiness; unset or empty leaves health unavailable. Startup runs migrations, but never starts a database server. |
 | `TKA_DATA_DIR` | Data directory. A nonempty value takes precedence over `FACTORY_RUNTIME_STATE`, then `./.tka-data`. Relative paths use the working directory; `~` is expanded. Startup creates the directory; the [acquisition library](docs/file-selection.md) stores source-specific clones beneath `repos/`. |
-| `TKA_ALLOW_LOCAL_SOURCES` | Set to exactly `1` to enable local Git sources in the acquisition library for tests and runtime checks; off by default. Source HTTP APIs are not built. |
 | `FACTORY_RUNTIME_STATE` | Data-directory fallback when `TKA_DATA_DIR` is unset or empty. An unset or empty fallback uses `./.tka-data`. |
 | `FACTORY_RUNTIME_CANDIDATE` | Exact build identity when set, including an empty value; otherwise the Git commit, then `unknown`, as described above. There is no `TKA_BUILD_ID` override. |
-| `TKA_MODELS` | Model-library mode, default `real`. Set `fake` for deterministic offline embeddings and a quoting answerer; no key is needed. Model factories reject unknown modes and raise `NotImplementedError` for `real` until providers are built. The current HTTP routes do not call the factories. Tests and runtime checks use `fake`. |
+| `TKA_MODELS` | Model-library mode, default `real`, using OpenRouter adapters. Set `fake` for deterministic offline embeddings and a quoting answerer; no key is needed. Startup and model factories reject unknown modes. The current HTTP routes do not call models yet. Tests and runtime checks use `fake`. |
+| `OPENROUTER_API_KEY` | Environment-only credential required at real-mode startup and for model calls. A missing, blank, or invalid key causes `ModelConfigurationError` naming the variable without revealing its value. Fake mode does not read it; never supply it to CI or runtime checks. |
+| `TKA_CHAT_MODEL` | OpenRouter chat model, default `anthropic/claude-sonnet-5.5`. Overrides are sent exactly as provided; blank IDs are rejected at real-mode startup. |
+| `TKA_EMBEDDING_MODEL` | OpenRouter embedding model, default `openai/text-embedding-3-small`. Overrides are sent exactly as provided; blank IDs are rejected at real-mode startup. |
+| `TKA_ALLOW_LOCAL_SOURCES` | Exactly `1` enables absolute local Git repository roots for offline tests and runtime checks. Off by default. The repository must have a public GitHub HTTPS `origin` for owner/name metadata. |
 
-The following settings belong to later increments in [the runtime contract](docs/prd.md#4-stack-and-runtime-contract-decided):
+See [model configuration](docs/model-configuration.md) for validation, timeout/retry
+limits, and error behavior.
 
-| Variable | Planned use and availability |
-|---|---|
-| `OPENROUTER_API_KEY` | Environment-only credential for future real-mode model calls. Not read by the current app; never supply it to CI or runtime checks. |
-| `TKA_CHAT_MODEL`, `TKA_EMBEDDING_MODEL` | Future OpenRouter model selection; not read by the current app. |
+## Sources API
+
+`POST /api/sources` with `{"url":"https://github.com/acme/handbook"}` returns
+202 and the persisted source: UUID `id`, normalized `url`, `owner`, `name`,
+`status: "queued"`, null `indexed_commit`, `indexed_at` and `error`, zero
+`file_count` and `chunk_count`, and `created_at`. `GET /api/sources` returns an
+array of sources in creation order; `GET /api/sources/{id}` returns one source
+or 404 for an unknown UUID.
+
+GitHub URLs are case insensitive; an optional `.git` suffix and trailing slash
+normalize to the same URL. Duplicates return 409 with `detail` and the existing
+`id`, including simultaneous submissions. Invalid inputs return 422 with a reason.
+Only repository HTTPS URLs on github.com are accepted: no credentials, query,
+fragment, SSH, or blob/tree/file paths. Registration makes no GitHub request and
+does not establish repository existence or public visibility; future acquisition
+must use anonymous access. No credentials are stored or used.
+
+With local sources enabled, pass an absolute Git working-tree root or bare
+repository path in `url`. The stored URL is the resolved local path, while
+owner/name come from its local `origin` configuration. Relative paths, non-Git
+directories and network paths are rejected. Registration only reads Git metadata;
+it never runs repository code, hooks, filters, or credential helpers.
 
 ## Checks
 
@@ -106,7 +135,8 @@ uv run python -m scripts.smoke
 ```
 
 Smoke checks real HTTP responses and assets, the extension and migration ledger,
-restart persistence, absent future APIs, and missing-database health. It creates
+source registration and restart persistence, absent future APIs, and
+missing-database health. It creates
 and cleans its own temporary data directory and app processes. It leaves the
 supplied database migrated. `--output PATH` also saves the observations as JSON.
 

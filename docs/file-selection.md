@@ -75,14 +75,15 @@ the application package. Protected factory infrastructure remains independent.
 
 ## File-record schema
 
-Startup migration `0002_files.sql` creates `files(id, source_id, path, blob_sha,
+Startup migration `0003_files.sql` creates `files(id, source_id, path, blob_sha,
 language)` in the configured Postgres database. IDs are UUIDs, all columns are
 required, and `(source_id, path)` is unique. The same path can belong to different
 sources, and blob IDs preserve either supported Git hash format as text.
-Source IDs are caller-owned, matching `SourceSpec`; there is no `sources` table
-yet, so this migration does not add a foreign key to a nonexistent registry.
-Acquisition returns metadata without writing rows. Worker persistence and source
-registration remain later increments; this schema supplies their file-record seam.
+Source IDs are caller-owned, matching `SourceSpec`; this primitive does not
+require a registry row or add a foreign key. The source registry is available
+separately through `/api/sources`. Acquisition returns metadata without writing
+rows. Worker persistence remains a later increment; this schema supplies its
+file-record seam. Migration 3 follows main's source-registry migration 2.
 
 ## Exact matching rules
 

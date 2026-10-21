@@ -8,7 +8,8 @@ The app provides the application page, database migrations, health, build
 identity, and a persistent source registry. Indexing, search, answers, and MCP
 are not built yet; accepted sources remain queued for a later worker.
 The model library provides deterministic fake embeddings and a quoting answerer.
-The app's HTTP routes do not call models yet.
+The app's HTTP routes do not call models yet. The [acquisition library](docs/file-selection.md)
+clones and selects commit-pinned text; registration does not yet invoke it.
 
 The pure [chunking library](docs/chunking.md) splits Markdown at headings and
 other text into overlapping line windows, preserving original text and exact
@@ -20,7 +21,7 @@ offline development and checks. See [model configuration](docs/model-configurati
 for model overrides, timeout/retry limits, and error behavior.
 
 Install Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 22 LTS (22.13 or
-newer), and Git. Run these commands from the checkout root:
+newer), and Git 2.47 or newer. Run these commands from the checkout root:
 
 ```text
 uv sync --frozen
@@ -77,7 +78,7 @@ credentials out of source files and command output.
 | Variable | Current behavior |
 |---|---|
 | `DATABASE_URL` | Connection URL for the existing Postgres database. Required for readiness; unset or empty leaves health unavailable. Startup runs migrations, but never starts a database server. |
-| `TKA_DATA_DIR` | Data directory. A nonempty value takes precedence over `FACTORY_RUNTIME_STATE`, then `./.tka-data`. Relative paths use the working directory; `~` is expanded. Startup creates the directory; cloning is not built. |
+| `TKA_DATA_DIR` | Data directory. A nonempty value takes precedence over `FACTORY_RUNTIME_STATE`, then `./.tka-data`. Relative paths use the working directory; `~` is expanded. Startup creates the directory; the [acquisition library](docs/file-selection.md) stores source-specific clones beneath `repos/`. |
 | `FACTORY_RUNTIME_STATE` | Data-directory fallback when `TKA_DATA_DIR` is unset or empty. An unset or empty fallback uses `./.tka-data`. |
 | `FACTORY_RUNTIME_CANDIDATE` | Exact build identity when set, including an empty value; otherwise the Git commit, then `unknown`, as described above. There is no `TKA_BUILD_ID` override. |
 | `TKA_MODELS` | Model-library mode, default `real`, using OpenRouter adapters. Set `fake` for deterministic offline embeddings and a quoting answerer; no key is needed. Startup and model factories reject unknown modes. The current HTTP routes do not call models yet. Tests and runtime checks use `fake`. |

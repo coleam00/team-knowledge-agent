@@ -138,7 +138,6 @@ def absent_features(client: httpx.Client) -> list[dict[str, object]]:
 
 def register_handbook(client: httpx.Client, state: Path) -> Source:
     repository = create_handbook_repo(state)
-    assert client.get("/api/sources").json() == []
     response = client.post("/api/sources", json={"url": str(repository)})
     assert response.status_code == 202
     source = Source.model_validate(response.json())
@@ -149,7 +148,6 @@ def register_handbook(client: httpx.Client, state: Path) -> Source:
     assert source.indexed_at is None
     assert source.error is None
     assert client.get(f"/api/sources/{source.id}").json() == response.json()
-    assert client.get("/api/sources").json() == [response.json()]
     duplicate = client.post("/api/sources", json={"url": str(repository)})
     assert duplicate.status_code == 409
     assert duplicate.json()["id"] == str(source.id)
@@ -157,7 +155,6 @@ def register_handbook(client: httpx.Client, state: Path) -> Source:
         "/api/sources", json={"url": "https://gitlab.com/acme/handbook"}
     )
     assert invalid.status_code == 422
-    assert client.get("/api/sources").json() == [response.json()]
     return source
 
 
@@ -213,7 +210,13 @@ def verify(observations: dict[str, object]) -> None:
                 "body": client.get("/api/build-id").text,
             }
             observations["assets"] = inspect_page(client)
+            assert client.get("/api/sources").json() == []
             source = register_handbook(client, Path(state))
+            second = register_handbook(client, Path(state))
+            assert source.id != second.id
+            sources = [item.model_dump(mode="json") for item in (source, second)]
+            assert client.get("/api/sources").json() == sources
+            observations["sources_before_restart"] = sources
             observations["source_before_restart"] = source.model_dump(mode="json")
             observations["indexing"] = {
                 "stage": "not yet built",
@@ -230,7 +233,9 @@ def verify(observations: dict[str, object]) -> None:
             persisted = client.get(f"/api/sources/{source.id}")
             assert persisted.status_code == 200
             assert persisted.json() == source.model_dump(mode="json")
-            assert client.get("/api/sources").json() == [persisted.json()]
+            persisted_sources = client.get("/api/sources").json()
+            assert persisted_sources == sources
+            observations["sources_after_restart"] = persisted_sources
             observations["source_after_restart"] = persisted.json()
         environment.pop("DATABASE_URL", None)
         with running_app(environment, observations, "missing_database") as (

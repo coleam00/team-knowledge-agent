@@ -4,7 +4,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -51,6 +52,20 @@ def create_app() -> FastAPI:
             await task
 
     application = FastAPI(lifespan=lifespan)
+
+    @application.exception_handler(RequestValidationError)
+    async def invalid_request(
+        request: Request, error: RequestValidationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": [
+                    {"type": item["type"], "loc": item["loc"]}
+                    for item in error.errors()
+                ]
+            },
+        )
 
     def source_settings() -> Settings:
         if not ready or settings is None:

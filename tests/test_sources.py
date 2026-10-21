@@ -3,16 +3,19 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
+from typing import get_args
 from uuid import uuid4
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg import sql
+from pydantic import ValidationError
 
 from app import db, main
 from app.config import Settings
 from app.git import git
-from app.sources import source_location
+from app.sources import Source, source_location
 from tests.handbook import ORIGIN, create_handbook_repo
 from tests.test_http import ClientFactory, wait_for_health
 
@@ -54,10 +57,20 @@ def test_registration_list_detail_and_restart(
         "created_at": source["created_at"],
     }
     assert source["id"] and source["created_at"]
+    second_response = sources_client.post(
+        "/api/sources", json={"url": "https://github.com/acme/runbooks"}
+    )
+    assert second_response.status_code == 202
+    second = second_response.json()
+    assert second["id"] != source["id"]
+    assert sources_client.get("/api/sources").json() == [source, second]
     with client_factory(main.create_app()) as restarted:
         wait_for_health(restarted, 200)
-        assert restarted.get("/api/sources").json() == [source]
-        assert restarted.get(f"/api/sources/{source['id']}").json() == source
+        assert restarted.get("/api/sources").json() == [source, second]
+        for registered in (source, second):
+            assert (
+                restarted.get(f"/api/sources/{registered['id']}").json() == registered
+            )
         assert restarted.get(f"/api/sources/{uuid4()}").status_code == 404
 
 
@@ -125,6 +138,70 @@ def test_invalid_sources_create_no_rows(
     assert sources_client.get("/api/sources").json() == []
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        '{"url": ["https://user:credential-sentinel@github.com/acme/repo"]}',
+        '{"url": {"password": "credential-sentinel"}}',
+        '"https://user:credential-sentinel@github.com/acme/repo"',
+        '["credential-sentinel"]',
+        '{"password": "credential-sentinel"}',
+        '{"url": "credential-sentinel",}',
+    ],
+)
+def test_body_validation_does_not_reflect_credentials(
+    sources_client: TestClient, body: str
+) -> None:
+    response = sources_client.post(
+        "/api/sources", content=body, headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]
+    assert "credential-sentinel" not in response.text
+    assert all(set(error) == {"type", "loc"} for error in response.json()["detail"])
+    assert sources_client.get("/api/sources").json() == []
+
+
+def test_detail_validation_does_not_reflect_credentials(
+    sources_client: TestClient,
+) -> None:
+    response = sources_client.get("/api/sources/user:credential-sentinel@github.com")
+    assert response.status_code == 422
+    assert response.json()["detail"] == [
+        {"type": "uuid_parsing", "loc": ["path", "source_id"]}
+    ]
+    assert "credential-sentinel" not in response.text
+    assert sources_client.get("/api/sources").json() == []
+
+
+@pytest.mark.parametrize("suffix", ["\u00a0", "\u2003"])
+@pytest.mark.parametrize("bare", [False, True], ids=["worktree", "bare"])
+def test_local_roots_preserve_trailing_whitespace(
+    sources_client: TestClient,
+    client_factory: ClientFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    suffix: str,
+    bare: bool,
+) -> None:
+    repository = tmp_path / f"repository{suffix}"
+    repository.mkdir()
+    arguments = ["init", "--template="]
+    if bare:
+        arguments.append("--bare")
+    git(repository, *arguments)
+    git(repository, "remote", "add", "origin", ORIGIN)
+    monkeypatch.setenv("TKA_ALLOW_LOCAL_SOURCES", "1")
+    with client_factory(main.create_app()) as enabled:
+        wait_for_health(enabled, 200)
+        response = enabled.post("/api/sources", json={"url": str(repository)})
+        assert response.status_code == 202
+        source = response.json()
+        assert Path(source["url"]).samefile(repository)
+        assert (source["owner"], source["name"]) == ("tka-fixtures", "handbook")
+        assert source["status"] == "queued"
+
+
 def test_local_opt_in_metadata_and_root_validation(
     sources_client: TestClient,
     client_factory: ClientFactory,
@@ -174,6 +251,58 @@ def test_database_enforces_url_uniqueness(
             "INSERT INTO sources (id, url, owner, name) VALUES (%s, %s, %s, %s)",
             (uuid4(), ORIGIN, "tka-fixtures", "handbook"),
         )
+
+
+def test_database_status_domain_matches_response_model(
+    sources_client: TestClient, database_url: str
+) -> None:
+    statuses = get_args(Source.model_fields["status"].annotation)
+    assert statuses
+    with db.connect(database_url) as conn:
+        conn.execute(
+            sql.SQL(
+                "CREATE TEMP TABLE expected_source_status "
+                "(status text CHECK (status IN ({})))"
+            ).format(sql.SQL(", ").join(sql.Literal(status) for status in statuses))
+        )
+        actual = conn.execute(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conrelid = 'sources'::regclass "
+            "AND conname = 'sources_status_check'"
+        ).fetchone()
+        expected = conn.execute(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conrelid = 'expected_source_status'::regclass AND contype = 'c'"
+        ).fetchone()
+        assert actual is not None and actual == expected
+
+    for status in statuses:
+        response = sources_client.post(
+            "/api/sources", json={"url": f"https://github.com/acme/{status}"}
+        )
+        assert response.status_code == 202
+        source = response.json()
+        with db.connect(database_url) as conn:
+            conn.execute(
+                "UPDATE sources SET status = %s WHERE id = %s",
+                (status, source["id"]),
+            )
+        source["status"] = status
+        assert sources_client.get(f"/api/sources/{source['id']}").json() == source
+    assert [
+        source["status"] for source in sources_client.get("/api/sources").json()
+    ] == (list(statuses))
+    for invalid in ("", "unknown", "READY"):
+        with pytest.raises(ValidationError):
+            Source.model_validate({**source, "status": invalid})
+        with (
+            pytest.raises(psycopg.errors.CheckViolation),
+            db.connect(database_url) as conn,
+        ):
+            conn.execute(
+                "UPDATE sources SET status = %s WHERE id = %s",
+                (invalid, source["id"]),
+            )
 
 
 def test_storage_failure_is_secret_safe(

@@ -21,4 +21,4 @@ def git(repository: Path, *arguments: str, timeout: int = 30) -> str:
         encoding="utf-8",
         timeout=timeout,
     )
-    return result.stdout.strip()
+    return result.stdout.removesuffix("\n")

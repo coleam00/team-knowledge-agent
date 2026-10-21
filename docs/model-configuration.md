@@ -22,8 +22,9 @@ The synchronous `Embedder.embed(text)` posts one input to
 `https://openrouter.ai/api/v1/embeddings`, requesting float encoding. It requires
 one result with index zero and a nonempty finite numeric vector, preserving
 coordinate order and the model's dimensions. It does not impose the fake model's
-256 dimensions on real embeddings. Callers must use `model_id` to keep compatible
-embeddings together when persistence is implemented.
+256 dimensions on real embeddings. The background worker stores each returned
+vector and the embedder's actual `model_id` with its chunk, so stored vectors keep
+their model identity.
 
 `Answerer.answer(question, chunks)` posts to `/api/v1/chat/completions`. The system
 message requires answers grounded in numbered sources. The user message encodes
@@ -47,8 +48,9 @@ Failures use `ModelError` subclasses for authentication, timeout, availability,
 request rejection, and invalid response. Raw provider bodies and transport
 exceptions are not logged or chained into these errors. Responses echoing the
 API key are rejected, including JSON-escaped echoes and keys containing quotes or
-backslashes. No provider request or
-response is persisted. Fake mode never imports the provider or reads the key.
+backslashes. Raw provider request/response bodies are not persisted; validated
+embedding vectors are stored in the index. Fake mode never imports the provider
+or reads the key.
 
 The HTTPS transport uses the Python standard library, so production does not
 depend on the development-only HTTP test client or require a lockfile change.

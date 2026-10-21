@@ -7,33 +7,13 @@ files are copied as data and are never imported or executed.
 
 import os
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
+from app.git import git
+
 FIXTURE = Path(__file__).parent / "fixtures" / "handbook-repo"
 ORIGIN = "https://github.com/tka-fixtures/handbook"
-
-
-def git(repository: Path, *arguments: str) -> str:
-    """Run a bounded local Git command without ambient config or hooks."""
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.upper().startswith("GIT_")
-    }
-    environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
-    result = subprocess.run(
-        ["git", "-c", f"core.hooksPath={os.devnull}", *arguments],
-        cwd=repository,
-        env=environment,
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=30,
-    )
-    return result.stdout.strip()
 
 
 def create_handbook_repo(tmp_path: Path) -> Path:

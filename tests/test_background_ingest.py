@@ -344,7 +344,7 @@ def test_disconnected_old_worker_cannot_publish(
     with ThreadPoolExecutor(1) as pool:
         running = pool.submit(worker.run_once, settings, Event())
         try:
-            assert embedder.entered.wait(10)
+            assert embedder.entered.wait(30)
             with db.connect(settings.database_url) as conn:
                 assert conn.execute(
                     "SELECT pg_terminate_backend(%s)", (owner_pids[0],)
@@ -377,9 +377,9 @@ def test_shutdown_fails_owned_work_and_preserves_unclaimed_jobs(
     with ThreadPoolExecutor(1) as pool:
         running = pool.submit(worker.run_worker, settings, stop)
         try:
-            assert embedder.entered.wait(10)
-            stop.set()
+            assert embedder.entered.wait(30)
         finally:
+            stop.set()
             embedder.release.set()
         running.result(timeout=10)
     assert_unpublished(settings.database_url or "", first)

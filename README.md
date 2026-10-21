@@ -11,6 +11,10 @@ The model library provides deterministic fake embeddings and a quoting answerer.
 The app's HTTP routes do not call models yet. The [acquisition library](docs/file-selection.md)
 clones and selects commit-pinned text; registration does not yet invoke it.
 
+The pure [chunking library](docs/chunking.md) splits Markdown at headings and
+other text into overlapping line windows, preserving original text and exact
+inclusive line ranges. It is available independently of the future indexer.
+
 The model interfaces also provide configurable OpenRouter adapters. Real mode
 (the default) requires `OPENROUTER_API_KEY` at startup; use `TKA_MODELS=fake` for
 offline development and checks. See [model configuration](docs/model-configuration.md)

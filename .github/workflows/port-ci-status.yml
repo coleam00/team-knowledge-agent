@@ -36,9 +36,13 @@ jobs:
           print(f"Reported {conclusion} for {repo} to Port")
           # Personal GitHub accounts get no live events in Port, so refresh the
           # files, PRs and scorecard inputs after every CI run on main.
+          # A failed resync is not a failed report: Port also resyncs on its own schedule.
           req = urllib.request.Request("https://api.port.io/v1/integration/github-ocean/resync", b"{}", method="POST")
           req.add_header("Content-Type", "application/json")
           req.add_header("Authorization", "Bearer " + token)
-          urllib.request.urlopen(req)
-          print("Requested a Port resync")
+          try:
+              urllib.request.urlopen(req)
+              print("Requested a Port resync")
+          except Exception as error:
+              print(f"::warning::Port resync request failed ({error}); the status was still reported")
           PY

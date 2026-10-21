@@ -11,6 +11,13 @@ import sys
 import time
 from pathlib import Path
 
+if __name__ == "__main__":
+    if sys.stdin.buffer.read(1) != b"1":
+        raise SystemExit(1)
+    child = subprocess.Popen(sys.argv[1:], stdin=subprocess.DEVNULL, shell=False)
+    raise SystemExit(child.wait())
+
+
 if sys.platform == "win32":
     import ctypes as c
     from ctypes import wintypes as w
@@ -128,9 +135,17 @@ class ProcessTree:
         else:
             self.job = None
         try:
-            # The trusted worker cannot launch the command before assignment.
+            # A Windows venv launcher spawns the real Python before assignment;
+            # assigning that launcher does not capture its existing descendant.
+            # This stdlib-only bootstrap must run the base interpreter directly.
+            # It cannot launch the command before ownership and the handshake.
             self.proc = subprocess.Popen(
-                [sys.executable, "-I", str(Path(__file__).resolve()), *argv],
+                [
+                    getattr(sys, "_base_executable", sys.executable),
+                    "-I",
+                    str(Path(__file__).resolve()),
+                    *argv,
+                ],
                 cwd=cwd,
                 env=env,
                 stdin=subprocess.PIPE,
@@ -174,10 +189,3 @@ class ProcessTree:
                 if self.proc.stdin is not None and not self.proc.stdin.closed:
                     self.proc.stdin.close()
                 self.closed = True
-
-
-if __name__ == "__main__":
-    if sys.stdin.buffer.read(1) != b"1":
-        raise SystemExit(1)
-    child = subprocess.Popen(sys.argv[1:], stdin=subprocess.DEVNULL, shell=False)
-    raise SystemExit(child.wait())

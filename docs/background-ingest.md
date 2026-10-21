@@ -82,6 +82,6 @@ Selected text still resides in acquisition memory; the spool bounds embedding
 memory to one file. Limits do not cap total Git disk use or whole-job duration.
 
 On Windows, the complete suite can run concurrently within the unchanged check
-deadline: set `PYTEST_ADDOPTS="-n 4"`, then run the documented unit/harness commands.
+deadline: set `PYTEST_ADDOPTS="-n 8"`, then run the documented unit/harness commands.
 The development dependency `pytest-xdist` runs every collected case; no tests or
 assertions are skipped by this option. CI can continue running serially on Linux.

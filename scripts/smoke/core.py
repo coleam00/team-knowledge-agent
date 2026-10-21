@@ -19,6 +19,7 @@ import httpx
 
 from app.config import Settings
 from app.db import MIGRATIONS, connect, migration_files
+from app.ingest._ownership import ProcessTree
 from app.sources import Source
 from tests.handbook import create_handbook_repo
 
@@ -63,9 +64,10 @@ def running_app(
         port = allocation.getsockname()[1]
     command = [sys.executable, "-m", "app", "serve", "--port", str(port)]
     with tempfile.TemporaryFile() as log:
-        process = subprocess.Popen(
-            command, cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT
+        tree = ProcessTree(
+            command, ROOT, environment, stdout=log.fileno(), stderr=log.fileno()
         )
+        process = tree.proc
         details: dict[str, object] = {"pid": process.pid, "argv": command}
         observations[label] = details
         try:
@@ -74,13 +76,7 @@ def running_app(
             ) as client:
                 yield process, client
         finally:
-            if process.poll() is None:
-                process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+            tree.close()
             details["exit_code"] = process.returncode
             details["cleanup_confirmed"] = process.poll() is not None
             log.seek(0)

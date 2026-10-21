@@ -28,8 +28,8 @@ class ChunkInput(BaseModel):
     def validate_metadata(self) -> "ChunkInput":
         if self.end_line < self.start_line:
             raise ValueError("Chunk end_line must not precede start_line")
-        if not self.embedding_model.strip():
-            raise ValueError("Chunk embedding_model must not be blank")
+        if not self.embedding_model.strip(" "):
+            raise ValueError("Chunk embedding_model must contain a non-space character")
         return self
 
 

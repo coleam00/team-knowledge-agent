@@ -1,3 +1,4 @@
+import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
@@ -66,7 +67,7 @@ def chunk(content: str = DEPLOY) -> ChunkInput:
         {"embedding": []},
         {"embedding": [float("nan")]},
         {"embedding": [float("inf")]},
-        {"embedding_model": " \t"},
+        {"embedding_model": "   "},
     ],
 )
 def test_invalid_chunk_metadata(changes: dict[str, object]) -> None:
@@ -75,11 +76,78 @@ def test_invalid_chunk_metadata(changes: dict[str, object]) -> None:
 
 
 @pytest.mark.database
+@pytest.mark.parametrize(
+    ("model", "accepted"),
+    [
+        ("", False),
+        (" ", False),
+        ("   ", False),
+        ("fixture/model-v1", True),
+        (" \tfixture/model-v1\n ", True),
+        ("\u200b", True),
+        ("\ufeff", True),
+        *[
+            (character, True)
+            for character in (
+                "\t\n\v\f\r\x1c\x1d\x1e\x1f\x85\xa0\u1680"
+                "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007"
+                "\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+            )
+        ],
+    ],
+)
+def test_model_identity_sql_and_python_conformance(
+    database_url: str, model: str, accepted: bool
+) -> None:
+    db.run_migrations(database_url)
+    payload = chunk().model_dump() | {"embedding_model": model}
+    with db.connect(database_url) as connection:
+        _, valid_id = seed_chunk(connection, source_id=uuid4(), path="valid.md")
+        if not accepted:
+            with pytest.raises(ValueError):
+                ChunkInput.model_validate(payload)
+            with pytest.raises(psycopg.errors.CheckViolation):
+                with connection.transaction():
+                    seed_chunk(connection, source_id=uuid4(), model=model)
+            with pytest.raises(psycopg.errors.CheckViolation):
+                with connection.transaction():
+                    connection.execute(
+                        "UPDATE chunks SET embedding_model = %s", (model,)
+                    )
+        else:
+            assert ChunkInput.model_validate(payload).embedding_model == model
+            _, inserted_id = seed_chunk(connection, source_id=uuid4(), model=model)
+            _, updated_id = seed_chunk(connection, source_id=uuid4())
+            connection.execute(
+                "UPDATE chunks SET embedding_model = %s WHERE id = %s",
+                (model, updated_id),
+            )
+    with db.connect(database_url) as connection:
+        matches = {match.id: match for match in full_text_search(connection, "deploys")}
+        assert matches[valid_id].embedding_model == "fixture/model-v1"
+        if accepted:
+            assert set(matches) == {valid_id, inserted_id, updated_id}
+            assert matches[inserted_id].embedding_model == model
+            assert matches[updated_id].embedding_model == model
+        else:
+            assert set(matches) == {valid_id}
+
+
+@pytest.mark.database
 def test_round_trip_and_reconnect(database_url: str) -> None:
     db.run_migrations(database_url)
     source_id = uuid4()
     text = "Deploys frozen\r\n\tCaf\u00e9 'quoted' <data>\r\nlast line"
-    original = chunk(text)
+    originals = [
+        chunk(text),
+        ChunkInput(
+            start_line=12,
+            end_line=13,
+            content="Deploys frozen again\nA different schedule",
+            embedding=(0.5, 0.125, -1.0),
+            embedding_model="fixture/model-v2",
+        ),
+    ]
     with db.connect(database_url) as connection:
         file_id = replace_file(
             connection,
@@ -87,17 +155,19 @@ def test_round_trip_and_reconnect(database_url: str) -> None:
             path="docs/caf\u00e9.md",
             blob_sha="b" * 40,
             language="markdown",
-            chunks=[original],
+            chunks=originals,
         )
         before = full_text_search(connection, "deploys frozen")
-        assert len(before) == 1
-        match = before[0]
-        assert match.file_id == file_id and match.source_id == source_id
-        assert match.path == "docs/caf\u00e9.md"
-        assert match.model_dump(include=set(ChunkInput.model_fields)) == (
-            original.model_dump()
-        )
-        assert match.rank > 0
+        assert len(before) == len(originals)
+        assert {
+            match.content: match.model_dump(include=set(ChunkInput.model_fields))
+            for match in before
+        } == {original.content: original.model_dump() for original in originals}
+        assert len({match.id for match in before}) == len(originals)
+        for match in before:
+            assert match.file_id == file_id and match.source_id == source_id
+            assert match.path == "docs/caf\u00e9.md"
+            assert match.rank > 0
     db.run_migrations(database_url)
     with db.connect(database_url) as connection:
         assert full_text_search(connection, "deploys frozen") == before
@@ -280,6 +350,81 @@ def test_full_text_limit_and_deterministic_ties(database_url: str) -> None:
         assert len({match.rank for match in before}) == 1
     with db.connect(database_url) as connection:
         assert full_text_search(connection, "deploys") == before
+
+
+@pytest.mark.database
+@pytest.mark.parametrize("previous_version", [3, 4])
+def test_long_paths_survive_schema_upgrade(
+    database_url: str, tmp_path: Path, previous_version: int
+) -> None:
+    for version, path in db.migration_files(db.MIGRATIONS):
+        if version <= 3:
+            (tmp_path / path.name).write_bytes(path.read_bytes())
+    if previous_version == 4:
+        legacy = Path(__file__).parent / "fixtures/migrations/0004_chunks.sql"
+        (tmp_path / legacy.name).write_bytes(legacy.read_bytes())
+    db.run_migrations(database_url, tmp_path)
+    long_path = (
+        "/".join(
+            hashlib.md5(str(i).encode(), usedforsecurity=False).hexdigest()
+            for i in range(1, 91)
+        )[:2658]
+        + ".md"
+    )
+    source_id, file_id = uuid4(), uuid4()
+    with db.connect(database_url) as connection:
+        if previous_version == 3:
+            connection.execute(
+                "INSERT INTO files VALUES (%s, %s, %s, 'original', 'markdown')",
+                (file_id, source_id, long_path),
+            )
+        else:
+            seed_chunk(connection, source_id=source_id, model="\t")
+            original_chunks = connection.execute("SELECT * FROM chunks").fetchall()
+        original_files = connection.execute("SELECT * FROM files").fetchall()
+        ledger = connection.execute(
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version"
+        ).fetchall()
+    db.run_migrations(database_url)
+    db.run_migrations(database_url)
+    with db.connect(database_url) as connection:
+        assert connection.execute("SELECT * FROM files").fetchall() == original_files
+        assert (
+            connection.execute(
+                "SELECT version, applied_at FROM schema_migrations "
+                "WHERE version <= %s ORDER BY version",
+                (previous_version,),
+            ).fetchall()
+            == ledger
+        )
+        if previous_version == 4:
+            assert (
+                connection.execute("SELECT * FROM chunks").fetchall() == original_chunks
+            )
+            assert full_text_search(connection, "deploys")[0].embedding_model == "\t"
+        else:
+            assert (
+                replace_file(
+                    connection,
+                    source_id=source_id,
+                    path=long_path,
+                    blob_sha="replacement",
+                    language="markdown",
+                    chunks=[chunk()],
+                )
+                == file_id
+            )
+        seed_chunk(connection, source_id=uuid4(), path=long_path)
+        assert any(
+            match.path == long_path for match in full_text_search(connection, "deploys")
+        )
+        for statement in (
+            "UPDATE chunks SET path = 'mismatched.md'",
+            "UPDATE chunks SET source_id = '00000000-0000-0000-0000-000000000000'",
+        ):
+            with pytest.raises(psycopg.errors.ForeignKeyViolation):
+                with connection.transaction():
+                    connection.execute(statement)
 
 
 @pytest.mark.database

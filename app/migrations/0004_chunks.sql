@@ -1,4 +1,5 @@
-ALTER TABLE files ADD CONSTRAINT files_chunk_identity UNIQUE (id, source_id, path);
+ALTER TABLE files ADD CONSTRAINT files_chunk_path UNIQUE (id, path);
+ALTER TABLE files ADD CONSTRAINT files_chunk_source UNIQUE (id, source_id);
 
 CREATE TABLE chunks (
     id uuid PRIMARY KEY,
@@ -11,7 +12,8 @@ CREATE TABLE chunks (
     tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED,
     embedding vector NOT NULL,
     embedding_model text NOT NULL CHECK (btrim(embedding_model) <> ''),
-    FOREIGN KEY (file_id, source_id, path) REFERENCES files (id, source_id, path)
+    FOREIGN KEY (file_id, path) REFERENCES files (id, path),
+    FOREIGN KEY (file_id, source_id) REFERENCES files (id, source_id)
 );
 
 CREATE INDEX chunks_tsv_idx ON chunks USING gin (tsv);

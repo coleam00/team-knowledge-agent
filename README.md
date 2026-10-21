@@ -131,6 +131,9 @@ limiting. Empty, stopword-only and unrelated queries return no matches.
 The forward migration adds generated English `tsv` with a GIN index and an
 untyped pgvector column; different models may store different vector dimensions.
 Embeddings use pgvector's float32 precision and retain their model identity.
+Model IDs are opaque and stored unchanged. SQL and Python reject empty IDs and
+IDs containing only ASCII spaces (U+0020); other characters, including tabs and
+Unicode whitespace, remain significant, preserving the existing SQL domain.
 Lexical retrieval does not compare embeddings. Vector/hybrid ranking and ingestion
 integration remain future increments; there is no ANN index or model call here.
 

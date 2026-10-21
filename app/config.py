@@ -1,3 +1,4 @@
+import math
 import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -24,6 +25,21 @@ class Settings:
     chat_model: str = "anthropic/claude-sonnet-5.5"
     embedding_model: str = "openai/text-embedding-3-small"
     allow_local_sources: bool = False
+    min_similarity: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.min_similarity is not None and (
+            not math.isfinite(self.min_similarity) or not -1 <= self.min_similarity <= 1
+        ):
+            raise ModelConfigurationError(
+                "TKA_MIN_SIMILARITY must be finite in [-1, 1]"
+            )
+
+    @property
+    def search_min_similarity(self) -> float:
+        if self.min_similarity is not None:
+            return self.min_similarity
+        return 0.25 if self.models_mode == "fake" else 0.35
 
     def validate_models(self) -> None:
         if self.models_mode not in {"fake", "real"}:
@@ -37,6 +53,11 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
+        try:
+            minimum = os.environ.get("TKA_MIN_SIMILARITY")
+            min_similarity = float(minimum) if minimum is not None else None
+        except ValueError:
+            raise ModelConfigurationError("Invalid TKA_MIN_SIMILARITY") from None
         directory = (
             os.environ.get("TKA_DATA_DIR")
             or os.environ.get("FACTORY_RUNTIME_STATE")
@@ -49,6 +70,7 @@ class Settings:
             chat_model=os.environ.get("TKA_CHAT_MODEL", cls.chat_model),
             embedding_model=os.environ.get("TKA_EMBEDDING_MODEL", cls.embedding_model),
             allow_local_sources=os.environ.get("TKA_ALLOW_LOCAL_SOURCES") == "1",
+            min_similarity=min_similarity,
         )
         settings.validate_models()
         return replace(settings, data_dir=settings.data_dir.expanduser().resolve())

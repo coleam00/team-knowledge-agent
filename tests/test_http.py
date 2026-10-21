@@ -178,7 +178,8 @@ def test_missing_web_build_and_unbuilt_routes(
         assert client.get("/").status_code == 503
         assert "build_web.py" in client.get("/").text
         assert client.get("/api/sources").status_code == 503
-        for path in ["/api/search", "/mcp", "/assets/missing.js"]:
+        assert client.get("/api/search?q=deploy").status_code == 503
+        for path in ["/mcp", "/assets/missing.js"]:
             assert client.get(path).status_code == 404
         assert client.post("/api/ask", json={"question": "hello"}).status_code == 404
 

@@ -45,8 +45,6 @@ class Settings:
             database_url=os.environ.get("DATABASE_URL") or None,
             data_dir=Path(directory).expanduser().resolve(),
             models_mode=os.environ.get("TKA_MODELS", "real"),
-            chat_model=os.environ.get("TKA_CHAT_MODEL", "anthropic/claude-sonnet-5.5"),
-            embedding_model=os.environ.get(
-                "TKA_EMBEDDING_MODEL", "openai/text-embedding-3-small"
-            ),
+            chat_model=os.environ.get("TKA_CHAT_MODEL", cls.chat_model),
+            embedding_model=os.environ.get("TKA_EMBEDDING_MODEL", cls.embedding_model),
         )

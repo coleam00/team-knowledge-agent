@@ -63,6 +63,8 @@ The reader's Git commands disable transports and lazy fetching, use isolated
 environment/config/hooks, and have a 30-second deadline per command. Only full
 lowercase SHA-1 or SHA-256 object IDs are accepted. The captured object must be
 a commit; matching regular blobs are read by object ID and checked for size.
+An unrelated missing blob does not block an intact file. Tree framing and the
+requested blob's metadata and content must still be readable and valid.
 
 Reads and acquisition share the exclusive source lock. A read writes only its
 owned transient lock/execution directory, which is cleaned on success or failure;

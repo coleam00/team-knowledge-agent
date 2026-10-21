@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -145,6 +146,31 @@ def test_objects_identity_and_lock(cache: Cache) -> None:
     missing = replace(cache, source=SourceSpec(uuid4(), cache.source.location))
     assert_error(missing, "not_found")
     assert not missing.directory.exists()
+
+
+def test_unrelated_missing_blob_does_not_block_requested_file(cache: Cache) -> None:
+    expected = cache.read("docs/deploy.md")
+    unrelated = cache.read().blob_sha
+    repository = cache.directory / "repository.git"
+    loose_object = repository / "objects" / unrelated[:2] / unrelated[2:]
+    loose_object.chmod(stat.S_IWRITE | stat.S_IREAD)
+    loose_object.unlink()
+    stored = snapshot(cache.directory)
+    assert cache.read("docs/deploy.md") == expected
+    assert_error(cache, "git_failed", path="README.md")
+    assert snapshot(cache.directory) == stored
+
+
+def test_corrupt_commit_is_unavailable_not_absent(cache: Cache) -> None:
+    assert_error(cache, "not_found", commit="0" * 40)
+    loose_object = (
+        cache.directory / "repository.git/objects" / cache.commit[:2] / cache.commit[2:]
+    )
+    loose_object.chmod(stat.S_IWRITE | stat.S_IREAD)
+    loose_object.write_bytes(b"corrupt commit object")
+    stored = snapshot(cache.directory)
+    assert_error(cache, "git_failed")
+    assert snapshot(cache.directory) == stored
 
 
 def test_external_storage_and_configuration(cache: Cache, tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import get_args
 from unittest.mock import MagicMock, Mock
 from uuid import UUID, uuid4
 
@@ -8,12 +9,12 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db, main, source_files
+from app import db, main, source_files, sources
 from app.chunking import chunk_text
 from app.config import Settings
 from app.ingest import CloneSelectError, SelectedFile, SourceSpec, clone_and_select
 from app.ingest.contracts import ErrorCode
-from app.source_files import SourceFileError, fetch_source_file
+from app.source_files import SourceFileError, SourceFileErrorCode, fetch_source_file
 from tests.handbook import create_handbook_repo
 from tests.test_clone_select import LIMITS, commit
 from tests.test_http import ClientFactory, wait_for_health
@@ -230,6 +231,31 @@ def test_error_mapping(
     assert response.json() == {"detail": "Source storage is unavailable"}
 
 
+def test_error_contract_is_exhaustive(
+    file_client: FileClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    codes = set(get_args(SourceFileErrorCode.__value__))
+    assert set(source_files._MESSAGES) == codes
+    assert set(sources._FILE_ERROR_STATUS) == codes
+    expected = {
+        "not_found": (404, "Source file not found"),
+        "invalid_path": (422, "Invalid source file path"),
+        "invalid_range": (422, "Invalid source line range"),
+        "unavailable": (503, "Source storage is unavailable"),
+        "busy": (503, "Source storage is busy"),
+    }
+    assert set(expected) == codes
+    for code in codes:
+        error = SourceFileError(code)
+        monkeypatch.setattr(sources, "fetch_source_file", Mock(side_effect=error))
+        response = file_client.client.get(file_client.url, params={"path": "file.md"})
+        status, message = expected[code]
+        assert str(error) == message
+        assert response.status_code == status
+        assert response.json() == {"detail": message}
+        assert response.headers.get("Retry-After") == ("1" if code == "busy" else None)
+
+
 def test_commit_is_captured_once(file_client: FileClient) -> None:
     f = file_client
 
@@ -256,6 +282,9 @@ def test_registry_cache_http_lifecycle(
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("TKA_ALLOW_LOCAL_SOURCES", "1")
     repository = create_handbook_repo(tmp_path)
+    deploy = repository / "docs/deploy.md"
+    deploy.write_bytes(deploy.read_bytes() + b"\nRange line 17\nRange line 18\nTail\n")
+    commit(repository)
     settings = Settings.from_env()
     with client_factory(main.create_app()) as client:
         wait_for_health(client, 200)
@@ -273,6 +302,9 @@ def test_registry_cache_http_lifecycle(
                 (first.commit_sha, source_id),
             )
         expected = next(f.content for f in first.files if f.path == "docs/deploy.md")
+        renamed_content = next(
+            f.content for f in first.files if f.path == "docs/onboarding.md"
+        )
         (repository / "docs/deploy.md").write_bytes(b"new deployment\n")
         (repository / "docs/legacy-deploy.md").unlink()
         (repository / "docs/onboarding.md").rename(repository / "docs/start.md")
@@ -285,6 +317,8 @@ def test_registry_cache_http_lifecycle(
             url, params={"path": "docs/deploy.md", "start": 14, "end": 18}
         ).json()
         assert window["content"] == "".join(expected.splitlines(keepends=True)[13:18])
+        assert len(window["content"].splitlines()) == 5
+        assert window["commit"] == first.commit_sha
         assert (window["start_line"], window["end_line"]) == (14, 18)
         with db.connect(database_url) as connection:
             connection.execute(
@@ -294,10 +328,9 @@ def test_registry_cache_http_lifecycle(
             assert connection.execute("SELECT count(*) FROM files").fetchone() == (0,)
         for path in ("docs/legacy-deploy.md", "docs/onboarding.md"):
             assert client.get(url, params={"path": path}).status_code == 404
-        assert (
-            client.get(url, params={"path": "docs/start.md"}).json()["commit"]
-            == second.commit_sha
-        )
+        renamed = client.get(url, params={"path": "docs/start.md"}).json()
+        assert renamed["commit"] == second.commit_sha
+        assert renamed["content"] == renamed_content
     with client_factory(main.create_app()) as client:
         wait_for_health(client, 200)
         result = client.get(url, params={"path": "docs/deploy.md"}).json()

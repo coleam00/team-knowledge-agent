@@ -90,12 +90,15 @@ class TreeFile:
     size_bytes: int
 
 
-def eligible_record(record: bytes) -> TreeFile | None:
+def eligible_record(record: bytes, *, path: str | None = None) -> TreeFile | None:
     try:
         metadata, raw_path = record.split(b"\t", 1)
         mode, kind, blob, raw_size = metadata.split()
     except ValueError:
         raise CloneSelectError("git_failed") from None
+    # A single-file read depends on tree framing, but not other blobs' metadata.
+    if path is not None and raw_path != path.encode("utf-8"):
+        return None
     if mode not in (b"100644", b"100755") or kind != b"blob":
         return None
     try:

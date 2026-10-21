@@ -18,7 +18,20 @@ from pydantic import BaseModel, NonNegativeInt, StrictStr
 from app import db
 from app.config import Settings
 from app.git import git
-from app.source_files import SourceFile, SourceFileError, fetch_source_file
+from app.source_files import (
+    SourceFile,
+    SourceFileError,
+    SourceFileErrorCode,
+    fetch_source_file,
+)
+
+_FILE_ERROR_STATUS: dict[SourceFileErrorCode, int] = {
+    "not_found": 404,
+    "invalid_path": 422,
+    "invalid_range": 422,
+    "unavailable": 503,
+    "busy": 503,
+}
 
 
 class SourceInput(BaseModel):
@@ -181,13 +194,7 @@ def source_router(get_settings: Callable[[], Settings]) -> APIRouter:
                 source_id, path=path, start=start, end=end, settings=settings
             )
         except SourceFileError as error:
-            status = {
-                "not_found": 404,
-                "invalid_path": 422,
-                "invalid_range": 422,
-                "unavailable": 503,
-                "busy": 503,
-            }[error.code]
+            status = _FILE_ERROR_STATUS[error.code]
             headers = {"Retry-After": "1"} if error.code == "busy" else None
             raise HTTPException(status, str(error), headers=headers) from None
 

@@ -136,7 +136,8 @@ class OpenRouterClient:
         try:
             result: object = json.loads(body.decode("utf-8"))
             # A provider may echo credentials even in an otherwise valid response.
-            if key not in json.dumps(result, ensure_ascii=False):
+            escaped_key = json.dumps(key, ensure_ascii=False)[1:-1]
+            if escaped_key not in json.dumps(result, ensure_ascii=False):
                 return result
         except (UnicodeError, ValueError, RecursionError):
             pass

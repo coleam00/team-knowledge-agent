@@ -6,6 +6,7 @@ import traceback
 from collections.abc import Callable
 from http.client import HTTPException, HTTPResponse
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -162,6 +163,31 @@ def test_hanging_reads_observe_injected_timeout_and_close_each_attempt(
         assert call.kwargs == {"timeout": 0.01}
 
 
+def test_successful_body_fragments_share_one_attempt_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    elapsed = 0.0
+    fragments = iter([b'{"data":', b"[", b"]}", b""])
+    connection = Mock()
+    reply = connection.getresponse.return_value
+    reply.status = 200
+    reply.isclosed.return_value = False
+
+    def read_fragment(_: int) -> bytes:
+        nonlocal elapsed
+        elapsed += 0.006
+        return next(fragments)
+
+    reply.read1.side_effect = read_fragment
+    monkeypatch.setattr(provider, "time", Mock(monotonic=lambda: elapsed))
+    monkeypatch.setattr(provider, "HTTPSConnection", Mock(return_value=connection))
+    with pytest.raises(TimeoutError):
+        provider.post("embeddings", b"{}", KEY, 0.01)
+    assert reply.read1.call_count == 2
+    connection.close.assert_called_once()
+    reply.close.assert_called_once()
+
+
 @pytest.mark.usefixtures("real_mode")
 def test_https_transport_headers_path_body_and_no_redirects(
     monkeypatch: pytest.MonkeyPatch,
@@ -297,6 +323,31 @@ def test_real_startup_refuses_missing_or_invalid_key_before_database_writes(
     assert KEY not in "".join(traceback.format_exception(caught.value)) + caplog.text
 
 
+@pytest.mark.parametrize(
+    "variable,value",
+    [
+        ("OPENROUTER_API_KEY", ""),
+        ("TKA_MODELS", "unknown"),
+        ("TKA_CHAT_MODEL", " "),
+        ("TKA_EMBEDDING_MODEL", " "),
+    ],
+)
+@pytest.mark.usefixtures("real_mode")
+def test_model_validation_precedes_directory_resolution(
+    monkeypatch: pytest.MonkeyPatch, variable: str, value: str
+) -> None:
+    monkeypatch.setenv("TKA_DATA_DIR", "~/data")
+    monkeypatch.setattr(
+        Path, "expanduser", Mock(side_effect=RuntimeError("No home directory"))
+    )
+    monkeypatch.setenv(variable, value)
+    migrate = Mock()
+    monkeypatch.setattr(db, "run_migrations", migrate)
+    with pytest.raises(ModelConfigurationError, match=variable):
+        main.create_app()
+    migrate.assert_not_called()
+
+
 @pytest.mark.usefixtures("real_mode")
 def test_valid_real_startup_never_passes_provider_key_to_database_or_public_surfaces(
     monkeypatch: pytest.MonkeyPatch,
@@ -370,6 +421,31 @@ def test_json_escaped_key_is_rejected() -> None:
     with pytest.raises(provider.ModelResponseError) as caught:
         provider.OpenRouterClient(transport=transport).request("chat/completions", {})
     assert KEY not in "".join(traceback.format_exception(caught.value))
+
+
+@pytest.mark.usefixtures("real_mode")
+@pytest.mark.parametrize("character", [chr(code) for code in range(33, 127)])
+def test_accepted_key_echo_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, character: str
+) -> None:
+    key = KEY + character + "suffix"
+    monkeypatch.setenv("OPENROUTER_API_KEY", key)
+    Settings.from_env().validate_models()
+    body = {
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": "Echo: " + key},
+            }
+        ]
+    }
+    transport = Mock(return_value=response(body))
+    with pytest.raises(provider.ModelResponseError) as caught:
+        provider.OpenRouterAnswerer(
+            "test", provider.OpenRouterClient(transport=transport)
+        ).answer("?", [AnswerChunk(1, "source")])
+    assert key not in "".join(traceback.format_exception(caught.value))
+    transport.assert_called_once()
 
 
 @pytest.mark.usefixtures("real_mode")

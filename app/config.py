@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 
@@ -41,10 +41,12 @@ class Settings:
             or os.environ.get("FACTORY_RUNTIME_STATE")
             or ".tka-data"
         )
-        return cls(
+        settings = cls(
             database_url=os.environ.get("DATABASE_URL") or None,
-            data_dir=Path(directory).expanduser().resolve(),
+            data_dir=Path(directory),
             models_mode=os.environ.get("TKA_MODELS", "real"),
             chat_model=os.environ.get("TKA_CHAT_MODEL", cls.chat_model),
             embedding_model=os.environ.get("TKA_EMBEDDING_MODEL", cls.embedding_model),
         )
+        settings.validate_models()
+        return replace(settings, data_dir=settings.data_dir.expanduser().resolve())

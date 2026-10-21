@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import db
 from app.build_id import resolve_build_id
-from app.config import Settings
+from app.config import ModelConfigurationError, Settings
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 logger = logging.getLogger(__name__)
@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 def create_app() -> FastAPI:
     try:
         settings = Settings.from_env()
+    except ModelConfigurationError:
+        raise
     except (OSError, RuntimeError, ValueError) as error:
         logger.error("Configuration failed (%s)", type(error).__name__)
         settings = None
-    if settings is not None:
-        settings.validate_models()
     build_id = resolve_build_id()
     ready = False
 

@@ -30,6 +30,8 @@ def isolated_environment(
 ) -> None:
     monkeypatch.setenv("TKA_MODELS", "fake")
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("TKA_CHAT_MODEL", raising=False)
+    monkeypatch.delenv("TKA_EMBEDDING_MODEL", raising=False)
     monkeypatch.setenv("TKA_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.delenv("FACTORY_RUNTIME_STATE", raising=False)
     monkeypatch.delenv("FACTORY_RUNTIME_CANDIDATE", raising=False)

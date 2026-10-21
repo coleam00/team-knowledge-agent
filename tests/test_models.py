@@ -163,10 +163,11 @@ def test_unknown_mode_is_rejected(monkeypatch: pytest.MonkeyPatch, mode: str) ->
 
 def test_real_mode_does_not_silently_use_fake(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TKA_MODELS")
-    assert Settings.from_env().models_mode == "real"
-    with pytest.raises(NotImplementedError, match="Real model providers"):
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+        Settings.from_env()
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
         get_embedder()
-    with pytest.raises(NotImplementedError, match="Real model providers"):
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
         get_answerer()
 
 

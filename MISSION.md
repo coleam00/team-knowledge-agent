@@ -117,13 +117,8 @@ The journeys in `harness/END-TO-END.md` are the full version. This runs on every
 
 ## Open questions -- decisions nobody has made yet
 
-These are undecided, not forbidden. **The factory may propose an answer to any of them**, build against it, and record what it assumed -- the merge is then held for a human, so nothing ships on a guess and nothing stops for one.
+All release-1 questions are answered (see Decisions). New ones go here. These are undecided, not forbidden. **The factory may propose an answer to any of them**, build against it, and record what it assumed -- the merge is then held for a human, so nothing ships on a guess and nothing stops for one.
 
-- **Q2** Which OpenRouter chat and embedding models are the defaults for real mode?
-- **Q3** What are the per-repo limits (file count, total size, clone timeout) before ingest refuses?
-- **Q4** Should re-index also run on a schedule, and how often?
-- **Q5** Should a source track a branch other than the default branch?
-- **Q6** What relevance threshold separates "I don't know" from a weak answer in real mode?
 
 **Except these, which do stop the factory** -- they are irreversible (see `FACTORY_RULES.md`) rather than open in the ordinary sense:
 
@@ -132,6 +127,12 @@ These are undecided, not forbidden. **The factory may propose an answer to any o
 
 ## Decisions
 
+- 2026-10-21 **Q2: default real-mode models?** Chat `anthropic/claude-sonnet-5.5`, embeddings `openai/text-embedding-3-small`, both through OpenRouter and overridable with `TKA_CHAT_MODEL` / `TKA_EMBEDDING_MODEL` (as PRD 4.3).
+- 2026-10-21 **Q3: per-repo ingest limits?** At most 5,000 indexable files, 200 MB of selected text, 1 MB per file (PRD), and a 120 s clone timeout; past a limit the source ends `failed` with a message naming the limit. All configurable.
+- 2026-10-21 **Q4: scheduled re-index?** No. Release 1 re-indexes only on request (the Re-index button and API).
+- 2026-10-21 **Q5: branches other than the default?** No. Release 1 always indexes the default branch.
+- 2026-10-21 **Q6: real-mode relevance threshold?** Cosine similarity 0.35 (fake mode 0.25), or any full-text match, as PRD 4.3; configurable with `TKA_MIN_SIMILARITY`.
+- 2026-10-21 **Dependencies (pre-approved, so no increment stops for this).** An increment may add a well-maintained library its acceptance criteria directly need, update `pyproject.toml` + `uv.lock` (`uv lock`) or `web/package.json` + `package-lock.json` accordingly, and name it and why in the PR body. Already expected: `mcp` (MCP Python SDK), `pgvector` (Python adapter), `httpx`, `@playwright/test` with its Chromium in CI. Never: an auth/identity library, a hosted vector database, or anything that calls a network service in fake mode.
 - 2026-10-21 **Q1: What chunk size and overlap give the best answers for code versus prose?** Approved defaults: an 80-line window with 10 lines of overlap for text and Markdown (Markdown still splits on headings first), configurable; revisit with real answer-quality evidence later.
 - 2026-10-20 **Must every change pass the complete journeys, or is delivery staged?** Staged: Gate 3 covers what is built, unbuilt steps pass as "not yet built", nothing may regress, and from increment 18 the full journeys are required (see Gate 3).
 - 2026-10-20 **Which stack?** Python 3.12 + FastAPI with uv; Postgres 17 + pgvector; Vite + React + TypeScript served by the backend on the same port.

@@ -93,12 +93,17 @@
 }
 
 .form input { width: 100%; }
+.form input::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
 .form p { margin: 0; }
 
 .error {
   color: var(--danger);
+  background: var(--error-surface);
   border-left: 2px solid var(--danger);
-  padding-left: 12px;
+  padding: 12px;
 }
 
 .sources button:disabled,

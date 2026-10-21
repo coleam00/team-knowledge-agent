@@ -8,6 +8,7 @@ class Settings:
     database_url: str | None = field(repr=False)
     data_dir: Path
     models_mode: str = "real"
+    allow_local_sources: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -20,4 +21,5 @@ class Settings:
             database_url=os.environ.get("DATABASE_URL") or None,
             data_dir=Path(directory).expanduser().resolve(),
             models_mode=os.environ.get("TKA_MODELS", "real"),
+            allow_local_sources=os.environ.get("TKA_ALLOW_LOCAL_SOURCES") == "1",
         )

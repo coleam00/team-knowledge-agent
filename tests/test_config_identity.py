@@ -39,6 +39,16 @@ def test_settings_do_not_expose_credentials(monkeypatch: pytest.MonkeyPatch) -> 
     assert "credential-sentinel" not in repr(Settings.from_env())
 
 
+@pytest.mark.parametrize("value", [None, "", "0", "true", "yes", " 1", "1"])
+def test_local_sources_require_exact_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str | None,
+) -> None:
+    if value is not None:
+        monkeypatch.setenv("TKA_ALLOW_LOCAL_SOURCES", value)
+    assert Settings.from_env().allow_local_sources is (value == "1")
+
+
 @pytest.mark.parametrize(
     "candidate", ["candidate-123", "  candidate\n", "", "révision"]
 )

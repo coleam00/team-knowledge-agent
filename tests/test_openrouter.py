@@ -1,7 +1,6 @@
 import json
 import subprocess
 import sys
-import time
 import traceback
 from collections.abc import Callable
 from http.client import HTTPException, HTTPResponse
@@ -139,28 +138,100 @@ def test_transport_errors_are_redacted_and_bounded(failure: Exception) -> None:
 def test_hanging_reads_observe_injected_timeout_and_close_each_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    connection = Mock()
-    connection.getresponse.return_value.status = 200
-    connection.getresponse.return_value.isclosed.return_value = False
+    elapsed = 0.0
+    connections: list[Mock] = []
 
-    def hanging_read(_: int) -> bytes:
-        timeout = connection.sock.settimeout.call_args.args[0]
-        time.sleep(timeout)
-        raise TimeoutError(KEY)
+    def make_connection(host: str, *, timeout: float) -> Mock:
+        connection = Mock()
+        reply = connection.getresponse.return_value
+        reply.status = 200
+        reply.isclosed.return_value = False
 
-    connection.getresponse.return_value.read1.side_effect = hanging_read
-    factory = Mock(return_value=connection)
+        def hanging_read(_: int) -> bytes:
+            nonlocal elapsed
+            read_timeout = connection.sock.settimeout.call_args.args[0]
+            assert read_timeout == pytest.approx(0.01)
+            # Only the read consumes time, regardless of host scheduling delays.
+            elapsed += read_timeout
+            raise TimeoutError(KEY)
+
+        reply.read1.side_effect = hanging_read
+        connections.append(connection)
+        return connection
+
+    factory = Mock(side_effect=make_connection)
+    monkeypatch.setattr(provider, "time", Mock(monotonic=lambda: elapsed))
     monkeypatch.setattr(provider, "HTTPSConnection", factory)
-    client = provider.OpenRouterClient(timeout=0.01, max_attempts=3, sleep=Mock())
-    started = time.monotonic()
+    sleep = Mock()
+    client = provider.OpenRouterClient(timeout=0.01, max_attempts=3, sleep=sleep)
     with pytest.raises(provider.ModelTimeoutError):
         client.request("embeddings", {})
-    assert 0.02 <= time.monotonic() - started < 1
-    assert factory.call_count == connection.close.call_count == 3
-    assert connection.getresponse.return_value.close.call_count == 3
+    assert elapsed == pytest.approx(0.03)
+    assert factory.call_count == len(connections) == 3
+    assert [call.args[0] for call in sleep.call_args_list] == [0.5, 1.0]
+    for connection in connections:
+        connection.connect.assert_called_once()
+        connection.request.assert_called_once()
+        connection.getresponse.assert_called_once()
+        connection.getresponse.return_value.read1.assert_called_once()
+        connection.getresponse.return_value.close.assert_called_once()
+        connection.close.assert_called_once()
     for call in factory.call_args_list:
         assert call.args == ("openrouter.ai",)
         assert call.kwargs == {"timeout": 0.01}
+
+
+@pytest.mark.usefixtures("real_mode")
+@pytest.mark.parametrize("phase", ["connect", "request"])
+@pytest.mark.parametrize("exhausted_attempts", [1, 3])
+def test_budget_exhaustion_before_response_closes_only_acquired_resources(
+    monkeypatch: pytest.MonkeyPatch, phase: str, exhausted_attempts: int
+) -> None:
+    elapsed = 0.0
+    connections = [Mock() for _ in range(3)]
+
+    def exhaust_budget(*args: object, **kwargs: object) -> None:
+        nonlocal elapsed
+        elapsed += 0.02
+
+    for index, connection in enumerate(connections):
+        reply = connection.getresponse.return_value
+        reply.status = 200
+        reply.isclosed.return_value = False
+        reply.read1.side_effect = TimeoutError(KEY)
+        if index < exhausted_attempts:
+            getattr(connection, phase).side_effect = exhaust_budget
+
+    factory = Mock(side_effect=connections)
+    monkeypatch.setattr(provider, "time", Mock(monotonic=lambda: elapsed))
+    monkeypatch.setattr(provider, "HTTPSConnection", factory)
+    sleep = Mock()
+    client = provider.OpenRouterClient(timeout=0.01, max_attempts=3, sleep=sleep)
+    with pytest.raises(provider.ModelTimeoutError):
+        client.request("embeddings", {})
+
+    assert factory.call_count == 3
+    assert [call.args[0] for call in sleep.call_args_list] == [0.5, 1.0]
+    for call in factory.call_args_list:
+        assert call.args == ("openrouter.ai",)
+        assert call.kwargs == {"timeout": 0.01}
+    for index, connection in enumerate(connections):
+        connection.connect.assert_called_once()
+        connection.close.assert_called_once()
+        reply = connection.getresponse.return_value
+        if index < exhausted_attempts:
+            if phase == "connect":
+                connection.request.assert_not_called()
+            else:
+                connection.request.assert_called_once()
+            connection.getresponse.assert_not_called()
+            reply.read1.assert_not_called()
+            reply.close.assert_not_called()
+        else:
+            connection.request.assert_called_once()
+            connection.getresponse.assert_called_once()
+            reply.read1.assert_called_once()
+            reply.close.assert_called_once()
 
 
 def test_successful_body_fragments_share_one_attempt_budget(

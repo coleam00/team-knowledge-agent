@@ -1,62 +1,38 @@
-import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import db
 from app.build_id import resolve_build_id
-from app.config import ModelConfigurationError, Settings
+from app.config import Settings
 from app.features import feature_modules
+from app.runtime import AppRuntime
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
-    try:
-        settings = Settings.from_env()
-    except ModelConfigurationError:
-        raise
-    except (OSError, RuntimeError, ValueError) as error:
-        logger.error("Configuration failed (%s)", type(error).__name__)
-        settings = None
+    runtime = AppRuntime.from_env()
     build_id = resolve_build_id()
-    ready = False
-
-    async def initialize() -> None:
-        nonlocal ready
-        if settings is None:
-            return
-        try:
-            await asyncio.to_thread(
-                settings.data_dir.mkdir, parents=True, exist_ok=True
-            )
-            await asyncio.to_thread(db.run_migrations, settings.database_url)
-        except Exception as error:
-            logger.error("Initialization failed (%s)", type(error).__name__)
-        else:
-            ready = True
 
     features = feature_modules()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        task = asyncio.create_task(initialize())
-        try:
+        async with runtime.run():
             async with AsyncExitStack() as stack:
                 for feature in features:
                     background = getattr(feature, "lifespan", None)
                     if background is not None:
                         await stack.enter_async_context(background(storage_settings))
                 yield
-        finally:
-            await task
 
     application = FastAPI(lifespan=lifespan)
 
@@ -75,9 +51,7 @@ def create_app() -> FastAPI:
         )
 
     def storage_settings() -> Settings:
-        if not ready or settings is None:
-            raise HTTPException(503, "Storage is unavailable")
-        return settings
+        return runtime.get_settings()
 
     for feature in features:
         install = getattr(feature, "install", None)
@@ -86,9 +60,9 @@ def create_app() -> FastAPI:
 
     @application.get("/api/health")
     def health() -> JSONResponse:
-        if ready and settings is not None:
+        if runtime.ready and runtime.settings is not None:
             try:
-                db.probe(settings.database_url)
+                db.probe(runtime.settings.database_url)
             except Exception as error:
                 logger.warning("Database probe failed (%s)", type(error).__name__)
             else:

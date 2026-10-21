@@ -6,8 +6,8 @@ Ask questions about your team's code and docs and get answers with citations. Bu
 
 The app provides the application page, database migrations, health, build
 identity, a persistent source registry, and [hybrid search](docs/search.md) with
-commit-pinned citations over stored chunks. Background indexing, answers, and
-MCP are not built yet; accepted sources remain queued for a later worker.
+commit-pinned citations over stored chunks. [MCP transports](docs/mcp.md) support HTTP and stdio with no production tools yet.
+Background indexing and answers are not built yet; accepted sources remain queued for a later worker.
 The model library provides deterministic fake embeddings and a quoting answerer.
 Search embeds each query with the active model. The [acquisition library](docs/file-selection.md)
 clones and selects commit-pinned text; registration does not yet invoke it.

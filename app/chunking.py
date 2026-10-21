@@ -5,6 +5,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal
 
+from app.text_lines import physical_lines
+
 _HEADING = re.compile(r" {0,3}#{1,6}(?:[ \t]|$)")
 _FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
 
@@ -15,14 +17,6 @@ class SourceChunk:
     start_line: int
     end_line: int
     content: str
-
-
-def _physical_lines(text: str) -> list[str]:
-    parts = text.split("\n")
-    lines = [part + "\n" for part in parts[:-1]]
-    if parts[-1]:
-        lines.append(parts[-1])
-    return lines
 
 
 def _markdown_sections(lines: list[str]) -> Iterator[tuple[int, int]]:
@@ -89,7 +83,7 @@ def chunk_text(
         raise ValueError("window_lines must be a positive integer")
     if type(overlap_lines) is not int or not 0 <= overlap_lines < window_lines:
         raise ValueError("overlap_lines must be an integer in [0, window_lines)")
-    lines = _physical_lines(text)
+    lines = physical_lines(text)
     sections = (
         _markdown_sections(lines) if kind == "markdown" else iter([(0, len(lines))])
     )

@@ -60,13 +60,16 @@ def failure_code(stderr: bytes) -> ErrorCode:
 
 
 class GitRunner:
-    def __init__(self, directory: Path, timeout: float, *, local: bool) -> None:
+    def __init__(
+        self, directory: Path, timeout: float, *, local: bool, offline: bool = False
+    ) -> None:
         executable = shutil.which("git")
         if executable is None:
             raise CloneSelectError("git_unavailable")
         self.executable = str(Path(executable).resolve())
         self.directory = directory
         self.timeout = timeout
+        self.offline = offline
         home = directory / "home"
         hooks = directory / "hooks"
         home.mkdir()
@@ -109,6 +112,10 @@ class GitRunner:
         }
         if local:
             settings["protocol.file.allow"] = "always"
+        if offline:
+            settings["protocol.https.allow"] = "never"
+            settings["protocol.file.allow"] = "never"
+            self.environment["GIT_NO_LAZY_FETCH"] = "1"
         self.options = [
             part for key, value in settings.items() for part in ("-c", f"{key}={value}")
         ]
@@ -141,7 +148,8 @@ class GitRunner:
         except (OSError, subprocess.SubprocessError):
             raise CloneSelectError("git_failed") from None
         if result.returncode not in allowed_codes:
-            raise CloneSelectError(failure_code(result.stderr)) from None
+            code = "git_failed" if self.offline else failure_code(result.stderr)
+            raise CloneSelectError(code) from None
         return result
 
 

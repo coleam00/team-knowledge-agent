@@ -9,7 +9,24 @@ import psycopg
 import pytest
 
 from app.sources import Source
-from scripts import smoke
+from scripts.smoke import core, run
+from scripts.smoke.features import f15_ingest as smoke
+from scripts.smoke.features import f90_unbuilt
+
+
+def test_absent_features_exclude_delivered_search() -> None:
+    paths: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        return httpx.Response(404)
+
+    with httpx.Client(
+        transport=httpx.MockTransport(respond), base_url="http://test"
+    ) as client:
+        observations = f90_unbuilt.absent_features(client)
+    assert paths == ["/api/sources/1/reindex", "/api/ask", "/mcp"]
+    assert all(item["stage"] == "not yet built" for item in observations)
 
 
 @pytest.mark.parametrize("operation", ["ledger", "preflight"])
@@ -26,9 +43,9 @@ def test_smoke_preserves_database_schema_and_bounds_waits(
 
     with pytest.raises(RuntimeError, match="connection intercepted"):
         if operation == "ledger":
-            smoke.ledger(database_url)
+            core.ledger(database_url)
         else:
-            smoke.verify({})
+            run.verify({})
 
     connect.assert_called_once_with(
         database_url,
@@ -46,7 +63,7 @@ def test_ledger_matches_discovered_migrations(
 ) -> None:
     for name in ["0001_initial.sql", "0002_next.sql"]:
         (tmp_path / name).write_text("SELECT 1;", encoding="utf-8")
-    monkeypatch.setattr(smoke, "MIGRATIONS", tmp_path)
+    monkeypatch.setattr(core, "MIGRATIONS", tmp_path)
     applied_at = datetime(2026, 1, 1, tzinfo=UTC)
     connection = MagicMock()
     connection.__enter__.return_value = connection
@@ -54,15 +71,15 @@ def test_ledger_matches_discovered_migrations(
     connection.execute.return_value.fetchall.return_value = [
         (version, applied_at) for version in versions
     ]
-    monkeypatch.setattr(smoke, "connect", lambda _: connection)
+    monkeypatch.setattr(core, "connect", lambda _: connection)
     if versions == [1, 2]:
-        assert smoke.ledger("test") == [
+        assert core.ledger("test") == [
             {"version": version, "applied_at": applied_at.isoformat()}
             for version in versions
         ]
     else:
         with pytest.raises(AssertionError):
-            smoke.ledger("test")
+            core.ledger("test")
 
 
 def test_source_poll_is_bounded_and_failure_is_visible(

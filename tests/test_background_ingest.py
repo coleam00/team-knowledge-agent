@@ -14,6 +14,7 @@ from psycopg.rows import TupleRow
 from app import db, jobs, main
 from app.chunking import chunk_text
 from app.config import Settings
+from app.features import f15_ingest
 from app.git import git
 from app.index_store import ChunkInput, replace_file
 from app.ingest import worker
@@ -200,7 +201,7 @@ def test_queued_job_survives_lifespan_and_runs_after_restart(
 ) -> None:
     monkeypatch.setattr(worker, "clone_and_select", select_documents)
     with monkeypatch.context() as held:
-        held.setattr(main, "run_worker", lambda settings, stop: stop.wait(10))
+        held.setattr(f15_ingest, "run_worker", lambda settings, stop: stop.wait(10))
         with client_factory(main.create_app()) as client:
             wait_for_health(client, 200)
             source = Source.model_validate(
@@ -449,3 +450,124 @@ def test_initial_publication_preserves_unexpected_index_data(
             "b" * 40 if existing == "commit" else None,
             jobs.INELIGIBLE,
         )
+
+
+@pytest.mark.parametrize("table", ["sources", "jobs"])
+def test_locked_oldest_job_does_not_starve_independent_source(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, table: str
+) -> None:
+    monkeypatch.setattr(worker, "clone_and_select", select_documents)
+    first = insert_source(settings.database_url or "")
+    second = insert_source(
+        settings.database_url or "", "https://github.com/acme/second"
+    )
+    with db.connect(settings.database_url) as locked:
+        column = "id" if table == "sources" else "source_id"
+        locked.execute(
+            f"SELECT 1 FROM {table} WHERE {column} = %s FOR UPDATE", (first,)
+        )
+        assert worker.run_once(settings, Event())
+        with db.connect(settings.database_url) as conn:
+            assert conn.execute(
+                "SELECT status FROM sources WHERE id = %s", (first,)
+            ).fetchone() == ("queued",)
+            assert conn.execute(
+                "SELECT status FROM sources WHERE id = %s", (second,)
+            ).fetchone() == ("ready",)
+        with jobs.ownership(settings.database_url, first) as owner:
+            assert owner is not None
+    assert worker.run_once(settings, Event())
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_model_change_restart_preserves_snapshot_and_exposes_reindex(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    client_factory: ClientFactory,
+    changed: bool,
+) -> None:
+    monkeypatch.setattr(worker, "clone_and_select", select_documents)
+    source_id = insert_source(settings.database_url or "")
+    assert worker.run_once(settings, Event())
+    before = snapshot(settings.database_url or "")
+    if changed:
+
+        class ChangedEmbedder(FakeEmbedder):
+            model_id = "changed-effective-model"
+
+        monkeypatch.setattr(worker, "get_embedder", lambda _: ChangedEmbedder())
+    else:
+        monkeypatch.setenv("TKA_EMBEDDING_MODEL", "ignored-in-fake-mode")
+    with client_factory(main.create_app()) as client:
+        wait_for_health(client, 200)
+        source = wait_source(client, source_id, "failed" if changed else "ready")
+        assert source.error == (worker.MODEL_CHANGED if changed else None)
+    after = snapshot(settings.database_url or "")
+    assert before[1:] == after[1:]
+    with db.connect(settings.database_url) as conn:
+        assert conn.execute(
+            "SELECT indexed_commit, file_count, chunk_count FROM sources"
+        ).fetchone() == ("a" * 40, 5, 5)
+
+
+def test_worker_honors_configured_git_deadline(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import subprocess
+
+    from app.ingest import _process
+    from app.ingest import git as ingest_git
+
+    repository = create_handbook_repo(tmp_path)
+    source_id = insert_source(settings.database_url or "", str(repository))
+    actual = _process.run_owned
+
+    def delayed_command(
+        argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float
+    ) -> subprocess.CompletedProcess[bytes]:
+        # Simulate a 2-second Git operation at the actual subprocess boundary.
+        if timeout < 2:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return actual(argv, cwd=cwd, env=env, timeout=timeout)
+
+    monkeypatch.setattr(ingest_git, "run_owned", delayed_command)
+    assert worker.run_once(
+        replace(settings, ingest_command_timeout_seconds=0.5), Event()
+    )
+    assert_unpublished(settings.database_url or "", source_id)
+    with db.connect(settings.database_url) as conn:
+        assert conn.execute("SELECT status, error FROM sources").fetchone() == (
+            "failed",
+            "Repository command exceeded its deadline.",
+        )
+        assert conn.execute(
+            "SELECT status, started_at <= finished_at, error FROM jobs"
+        ).fetchone() == ("failed", True, "Repository command exceeded its deadline.")
+
+
+def test_per_file_limit_skips_only_larger_files_and_cached_reads_agree(
+    settings: Settings, tmp_path: Path
+) -> None:
+    from app.source_files import SourceFileError, fetch_source_file
+
+    repository = create_handbook_repo(tmp_path)
+    (repository / "boundary.txt").write_bytes(b"a" * 50)
+    (repository / "over.txt").write_bytes(b"b" * 51)
+    git(repository, "add", ".")
+    git(repository, "commit", "-m", "File size boundaries")
+    source_id = insert_source(settings.database_url or "", str(repository))
+    with db.connect(settings.database_url) as conn:
+        conn.execute("UPDATE sources SET owner = 'tka-fixtures', name = 'handbook'")
+    limited = replace(settings, ingest_max_file_bytes=50)
+    assert worker.run_once(limited, Event())
+    with db.connect(settings.database_url) as conn:
+        paths = {row[0] for row in conn.execute("SELECT path FROM files")}
+        assert "boundary.txt" in paths and "over.txt" not in paths
+        assert conn.execute("SELECT status FROM sources").fetchone() == ("ready",)
+    assert (
+        fetch_source_file(source_id, path="boundary.txt", settings=limited).content
+        == "a" * 50
+    )
+    with pytest.raises(SourceFileError) as error:
+        fetch_source_file(source_id, path="over.txt", settings=limited)
+    assert error.value.code == "not_found"

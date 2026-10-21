@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app import db, main
+from app.features import f15_ingest
 
 ClientFactory = Callable[[FastAPI], TestClient]
 
@@ -69,7 +70,7 @@ def test_initialization_failure_is_sticky_and_secret_safe(
 ) -> None:
     migration = Mock(side_effect=RuntimeError("credential-sentinel"))
     worker = Mock()
-    monkeypatch.setattr(main, "run_worker", worker)
+    monkeypatch.setattr(f15_ingest, "run_worker", worker)
     monkeypatch.setattr(db, "run_migrations", migration)
     with client_factory(main.create_app()) as client:
         response = client.get("/api/health")
@@ -125,7 +126,7 @@ def test_shutdown_waits_for_initialization(
 
     monkeypatch.setattr(db, "run_migrations", migrate)
     worker = Mock()
-    monkeypatch.setattr(main, "run_worker", worker)
+    monkeypatch.setattr(f15_ingest, "run_worker", worker)
     client = client_factory(main.create_app())
     client.__enter__()
     try:
@@ -162,7 +163,7 @@ def test_lifespan_starts_worker_after_migrations_and_joins_it(
         finished.set()
 
     monkeypatch.setattr(db, "run_migrations", lambda _: migrated.set())
-    monkeypatch.setattr(main, "run_worker", run_worker)
+    monkeypatch.setattr(f15_ingest, "run_worker", run_worker)
     with client_factory(main.create_app()):
         assert entered.wait(5)
         assert not finished.is_set()
@@ -177,13 +178,18 @@ def test_worker_start_failure_does_not_join_an_unstarted_thread(
 ) -> None:
     thread = Mock()
     thread.start.side_effect = RuntimeError("credential-sentinel")
-    monkeypatch.setattr(main, "Thread", Mock(return_value=thread))
+    monkeypatch.setattr(db, "probe", Mock())
+    monkeypatch.setattr(f15_ingest, "Thread", Mock(return_value=thread))
     monkeypatch.setattr(db, "run_migrations", Mock())
     with client_factory(main.create_app()) as client:
-        assert client.get("/api/health").status_code == 503
-    thread.start.assert_called_once()
+        wait_for_health(client, 200)
+        deadline = time.monotonic() + 5
+        while not thread.start.called and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert thread.start.called
+    assert thread.start.call_count >= 1
     thread.join.assert_not_called()
-    assert "Initialization failed (RuntimeError)" in caplog.text
+    assert "Worker startup failed (RuntimeError)" in caplog.text
     assert "credential-sentinel" not in caplog.text
 
 
@@ -227,7 +233,8 @@ def test_missing_web_build_and_unbuilt_routes(
         assert client.get("/").status_code == 503
         assert "build_web.py" in client.get("/").text
         assert client.get("/api/sources").status_code == 503
-        for path in ["/api/search", "/mcp", "/assets/missing.js"]:
+        assert client.get("/api/search?q=deploy").status_code == 503
+        for path in ["/mcp", "/assets/missing.js"]:
             assert client.get(path).status_code == 404
         assert client.post("/api/ask", json={"question": "hello"}).status_code == 404
 

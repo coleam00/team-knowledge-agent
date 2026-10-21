@@ -12,6 +12,9 @@ allows only one queued/indexing job per source. A deterministic per-source sessi
 advisory lock owns the job through claim, preparation and publication; all writes
 use that same connection. Direct or session-affine PostgreSQL connections are
 required; transaction-pooling proxies are incompatible with this ownership.
+Every process sharing a database must share the underlying `TKA_DATA_DIR` storage,
+including Git caches and filesystem locks. Separate caches can return file 404s
+for otherwise ready sources; ready jobs do not rebuild missing caches.
 
 The worker commits the indexing status and job start time before acquisition.
 It clones/selects a pinned commit, chunks each selected file, and embeds each
@@ -38,7 +41,7 @@ Shutdown signals the worker, waits for initialization and joins the thread.
 Unclaimed jobs stay queued. Owned work interrupted before publication becomes
 failed; a publication already in progress finishes atomically. Shutdown waits for
 the current synchronous Git/model call and its existing timeout/cleanup; it has
-no fixed total deadline. Process/connection loss releases session ownership; a
+a 600-second join deadline. Process/connection loss releases session ownership; a
 surviving worker marks an abandoned indexing job failed when it acquires that
 lock. The disconnected worker cannot publish on a replacement connection.
 
@@ -56,7 +59,29 @@ stale storage; the worker never steals filesystem locks or sweeps directories.
 Local registration accepts bare repositories, but acquisition only supports normal
 working trees, so bare sources end failed with an unsupported-layout message.
 
-See the README for configurable file-count/aggregate-byte/Git-command limits and
-chunk window/overlap. Selection's 1,000,000-byte per-file exclusion is fixed.
+Configuration (positive limits; overlap must be an integer in [0, window)):
+
+| Environment variable | Default | Behavior |
+| --- | --- | --- |
+| `TKA_INGEST_MAX_FILES` | 5000 | Fail when selected file count exceeds the limit |
+| `TKA_INGEST_MAX_TOTAL_BYTES` | 200000000 | Fail when selected text exceeds the limit |
+| `TKA_INGEST_MAX_FILE_BYTES` | 1000000 | Skip larger files; cached reads use the same cap |
+| `TKA_INGEST_COMMAND_TIMEOUT_SECONDS` | 120 | Fail when a Git command exceeds its deadline |
+| `TKA_CHUNK_WINDOW_LINES` | 80 | Maximum lines in a chunk |
+| `TKA_CHUNK_OVERLAP_LINES` | 10 | Overlap within a text/Markdown section |
+
+On startup, nonempty ready sources containing embeddings from a different effective
+model become `failed` with an explicit re-index-required error. Stored files,
+chunks, commits, counts and completed jobs remain intact; no automatic jobs are
+created. Unchanged effective models (including ignored model overrides in fake
+mode) preserve ready state. Re-index execution remains a later increment.
+
+Claim row-lock timeouts release ownership and continue to independent sources;
+shared database outages retain the worker's backoff.
 Selected text still resides in acquisition memory; the spool bounds embedding
 memory to one file. Limits do not cap total Git disk use or whole-job duration.
+
+On Windows, the complete suite can run concurrently within the unchanged check
+deadline: set `PYTEST_ADDOPTS="-n 4"`, then run the documented unit/harness commands.
+The development dependency `pytest-xdist` runs every collected case; no tests or
+assertions are skipped by this option. CI can continue running serially on Linux.

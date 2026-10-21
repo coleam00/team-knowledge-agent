@@ -8,7 +8,7 @@ import psycopg
 from psycopg.rows import TupleRow
 from pydantic import BaseModel
 
-from app import jobs
+from app import db, jobs
 from app.chunking import chunk_text
 from app.config import Settings
 from app.index_store import ChunkInput, replace_file
@@ -52,6 +52,7 @@ def prepare(
             settings.ingest_max_files,
             settings.ingest_max_total_bytes,
             settings.ingest_command_timeout_seconds,
+            settings.ingest_max_file_bytes,
         ),
     )
     check_stop(stop)
@@ -168,20 +169,44 @@ def run_once(settings: Settings, stop: Event) -> bool:
     for job in jobs.active_jobs(settings.database_url):
         if stop.is_set():
             break
-        with jobs.ownership(settings.database_url, job.source_id) as connection:
-            if (
-                connection is not None
-                and not stop.is_set()
-                and jobs.claim(connection, job)
-            ):
-                execute(connection, job, settings, stop)
-                return True
+        try:
+            with jobs.ownership(settings.database_url, job.source_id) as connection:
+                if (
+                    connection is not None
+                    and not stop.is_set()
+                    and jobs.claim(connection, job)
+                ):
+                    execute(connection, job, settings, stop)
+                    return True
+        except (psycopg.errors.QueryCanceled, psycopg.errors.LockNotAvailable):
+            # The ownership context has rolled back and released its session lock.
+            # An item-local row lock must not starve independent queued sources.
+            logger.warning("Claim timed out source=%s job=%s", job.source_id, job.id)
     return False
 
 
+MODEL_CHANGED = "Embedding model changed; re-index required. Stored snapshot preserved."
+
+
+def reconcile_model(settings: Settings) -> None:
+    model_id = get_embedder(settings).model_id
+    with db.connect(settings.database_url) as connection:
+        connection.execute(
+            "UPDATE sources s SET status = 'failed', error = %s "
+            "WHERE s.status = 'ready' AND EXISTS ("
+            "SELECT 1 FROM chunks c WHERE c.source_id = s.id "
+            "AND c.embedding_model <> %s)",
+            (MODEL_CHANGED, model_id),
+        )
+
+
 def run_worker(settings: Settings, stop: Event) -> None:
+    reconciled = False
     while not stop.is_set():
         try:
+            if not reconciled:
+                reconcile_model(settings)
+                reconciled = True
             worked = run_once(settings, stop)
         except Exception as error:
             logger.warning("Ingest worker unavailable (%s)", type(error).__name__)

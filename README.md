@@ -5,17 +5,16 @@ Ask questions about your team's code and docs and get answers with citations. Bu
 ## Run it
 
 The app provides the application page, database migrations, health, build
-identity, and a persistent source registry. [Background indexing](docs/background-ingest.md)
-turns accepted sources into complete, durable indexes or explicit failures.
-The storage library persists chunks and retrieves full-text matches. HTTP search,
-answers, re-index and MCP are not built yet.
+identity, a persistent source registry, and [hybrid search](docs/search.md) with
+commit-pinned citations over stored chunks. Background indexing, answers, and
+MCP are not built yet; accepted sources remain queued for a later worker.
 The model library provides deterministic fake embeddings and a quoting answerer.
-The worker uses the [acquisition library](docs/file-selection.md) to clone and
-select commit-pinned text, then chunks, embeds and publishes it asynchronously.
+Search embeds each query with the active model. The [acquisition library](docs/file-selection.md)
+clones and selects commit-pinned text; registration does not yet invoke it.
 
 The pure [chunking library](docs/chunking.md) splits Markdown at headings and
 other text into overlapping line windows, preserving original text and exact
-inclusive line ranges. The worker uses it with configurable size and overlap.
+inclusive line ranges. It is available independently of the future indexer.
 
 The model interfaces also provide configurable OpenRouter adapters. Real mode
 (the default) requires `OPENROUTER_API_KEY` at startup; use `TKA_MODELS=fake` for
@@ -83,16 +82,12 @@ credentials out of source files and command output.
 | `TKA_DATA_DIR` | Data directory. A nonempty value takes precedence over `FACTORY_RUNTIME_STATE`, then `./.tka-data`. Relative paths use the working directory; `~` is expanded. Startup creates the directory; the [acquisition library](docs/file-selection.md) stores source-specific clones beneath `repos/`. |
 | `FACTORY_RUNTIME_STATE` | Data-directory fallback when `TKA_DATA_DIR` is unset or empty. An unset or empty fallback uses `./.tka-data`. |
 | `FACTORY_RUNTIME_CANDIDATE` | Exact build identity when set, including an empty value; otherwise the Git commit, then `unknown`, as described above. There is no `TKA_BUILD_ID` override. |
-| `TKA_MODELS` | Model mode, default `real`, using OpenRouter adapters. Set `fake` for deterministic offline embeddings and a quoting answerer; no key is needed. Startup and model factories reject unknown modes. Background indexing calls the selected embedder. Tests and runtime checks use `fake`. |
+| `TKA_MODELS` | Model mode, default `real`, using OpenRouter adapters. Set `fake` for deterministic offline embeddings and a quoting answerer; no key is needed. Search embeds queries with this mode. Startup and model factories reject unknown modes. Tests and runtime checks use `fake`. |
 | `OPENROUTER_API_KEY` | Environment-only credential required at real-mode startup and for model calls. A missing, blank, or invalid key causes `ModelConfigurationError` naming the variable without revealing its value. Fake mode does not read it; never supply it to CI or runtime checks. |
 | `TKA_CHAT_MODEL` | OpenRouter chat model, default `anthropic/claude-sonnet-5.5`. Overrides are sent exactly as provided; blank IDs are rejected at real-mode startup. |
 | `TKA_EMBEDDING_MODEL` | OpenRouter embedding model, default `openai/text-embedding-3-small`. Overrides are sent exactly as provided; blank IDs are rejected at real-mode startup. |
+| `TKA_MIN_SIMILARITY` | Inclusive search cosine threshold, default 0.25 in fake mode and 0.35 in real mode. Overrides must be finite in [-1, 1]. Full-text matches remain eligible independently. |
 | `TKA_ALLOW_LOCAL_SOURCES` | Exactly `1` enables absolute local Git repository roots for offline tests and runtime checks. Off by default. The repository must have a public GitHub HTTPS `origin` for owner/name metadata. |
-| `TKA_INGEST_MAX_FILES` | Positive selected-file limit, default `5000`. |
-| `TKA_INGEST_MAX_TOTAL_BYTES` | Positive selected-text byte limit, default `200000000`. |
-| `TKA_INGEST_COMMAND_TIMEOUT_SECONDS` | Positive finite timeout per Git subprocess, default `120`; not a total job deadline. |
-| `TKA_CHUNK_WINDOW_LINES` | Positive chunk window, default `80`. |
-| `TKA_CHUNK_OVERLAP_LINES` | Chunk overlap, default `10`; must satisfy `0 <= overlap < window`. |
 
 See [model configuration](docs/model-configuration.md) for validation, timeout/retry
 limits, and error behavior.
@@ -106,20 +101,12 @@ limits, and error behavior.
 array of sources in creation order; `GET /api/sources/{id}` returns one source
 or 404 for an unknown UUID.
 
-Registration atomically creates one queued job and returns without waiting for
-embeddings. Poll GET for `indexing`, then `ready` with commit/counts/indexed time,
-or `failed` with a safe error. Complete snapshots publish in one transaction.
-Ready indexes persist across restart; queued jobs resume. Failed jobs are not
-automatically retried. Migration 6 queues existing queued sources once, so an
-upgrade begins indexing them. See [worker operation](docs/background-ingest.md)
-for ownership, job timestamps and shutdown/recovery behavior.
-
 `GET /api/sources/{id}/file?path=docs/deploy.md&start=14&end=18` returns
 exact inclusive lines at the persisted `indexed_commit`, with the commit, path,
 actual line bounds and total line count. Omit the range for the whole file.
 Reads use eligible cached Git blobs and never fetch upstream or read working
 files. Missing indexed content returns 404; unsafe paths or invalid ranges return
-422. Content becomes available after the background job publishes its snapshot.
+422. Registration remains queued and does not create indexed content.
 See the [source file contract](docs/source-files.md) for ranges, eligibility,
 storage safety, concurrency and the shared service used by future adapters.
 
@@ -128,16 +115,14 @@ normalize to the same URL. Duplicates return 409 with `detail` and the existing
 `id`, including simultaneous submissions. Invalid inputs return 422 with a reason.
 Only repository HTTPS URLs on github.com are accepted: no credentials, query,
 fragment, SSH, or blob/tree/file paths. Registration makes no GitHub request and
-does not establish repository existence or public visibility; background acquisition
-uses anonymous access. No source credentials are stored or used.
+does not establish repository existence or public visibility; future acquisition
+must use anonymous access. No credentials are stored or used.
 
 With local sources enabled, pass an absolute Git working-tree root or bare
 repository path in `url`. The stored URL is the resolved local path, while
 owner/name come from its local `origin` configuration. Relative paths, non-Git
 directories and network paths are rejected. Registration only reads Git metadata;
 it never runs repository code, hooks, filters, or credential helpers.
-Acquisition supports normal working trees only: a bare repository registers but
-its job fails explicitly with an unsupported-layout error.
 
 ## Chunk storage and lexical retrieval
 
@@ -163,13 +148,14 @@ Embeddings use pgvector's float32 precision and retain their model identity.
 Model IDs are opaque and stored unchanged. SQL and Python reject empty IDs and
 IDs containing only ASCII spaces (U+0020); other characters, including tabs and
 Unicode whitespace, remain significant, preserving the existing SQL domain.
-Lexical retrieval does not compare embeddings. Vector/hybrid ranking remains a
-future increment; there is no ANN index or model call in this storage primitive.
+The low-level lexical API does not compare embeddings or call a model. Public
+[hybrid search](docs/search.md) combines it with compatible exact cosine candidates
+and returns commit-pinned evidence. See [background ingestion](docs/background-ingest.md) for jobs, limits and deployment.
 
 ## Checks
 
-With the locked dependencies installed and `DATABASE_URL` pointing to a dedicated
-test database:
+With the locked dependencies installed and `DATABASE_URL` (or the test-only
+fallback `TKA_TEST_DATABASE_URL`) pointing to a dedicated test database:
 
 ```text
 uv run python scripts/check.py static
@@ -192,9 +178,8 @@ uv run python -m scripts.smoke
 ```
 
 Smoke checks real HTTP responses and assets, the extension and migration ledger,
-asynchronous indexing with exact commits/counts/vectors, explicit clone failures,
-commit-pinned file reads across edits/deletions/renames in distinct sources,
-unchanged chunk/job rows after restart, absent future APIs, and
+source registration, seeded hybrid citations, commit-pinned file reads across
+edits/deletions/renames, restart persistence for both APIs, absent future APIs, and
 missing-database health. It creates
 and cleans its own temporary data directory and app processes. It leaves the
 supplied database migrated. `--output PATH` also saves the observations as JSON.

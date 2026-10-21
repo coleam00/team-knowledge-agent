@@ -1,19 +1,9 @@
 import { useId, useRef, useState, type Ref } from 'react'
 import { UnknownAnswer } from './States'
 import styles from './Answer.module.css'
+import type { Citation } from '../citation'
 
-/** The API citation is the authority for the range, commit and URL. */
-export interface Citation {
-  n: number
-  source_id: string
-  repo: string
-  path: string
-  start_line: number
-  end_line: number
-  commit: string
-  url: string
-  snippet: string
-}
+export type { Citation } from '../citation'
 
 export interface AnswerResponse {
   known: boolean

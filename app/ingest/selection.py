@@ -90,7 +90,9 @@ class TreeFile:
     size_bytes: int
 
 
-def eligible_record(record: bytes, *, path: str | None = None) -> TreeFile | None:
+def eligible_record(
+    record: bytes, *, path: str | None = None, max_file_bytes: int = MAX_FILE_BYTES
+) -> TreeFile | None:
     try:
         metadata, raw_path = record.split(b"\t", 1)
         mode, kind, blob, raw_size = metadata.split()
@@ -114,7 +116,7 @@ def eligible_record(record: bytes, *, path: str | None = None) -> TreeFile | Non
         raise CloneSelectError("git_failed") from None
     if size < 0:
         raise CloneSelectError("git_failed")
-    if size > MAX_FILE_BYTES:
+    if size > max_file_bytes:
         return None
     return TreeFile(path, object_id(blob), language, size)
 
@@ -148,7 +150,7 @@ def select_files(
     for record in tree.split(b"\0"):
         if not record:
             continue
-        entry = eligible_record(record)
+        entry = eligible_record(record, max_file_bytes=limits.max_file_bytes)
         if entry is None:
             continue
         file = read_blob(runner, repository, entry)

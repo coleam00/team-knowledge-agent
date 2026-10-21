@@ -1,9 +1,8 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
-from threading import Event, Thread
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -13,8 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from app import db
 from app.build_id import resolve_build_id
 from app.config import ModelConfigurationError, Settings
-from app.ingest.worker import run_worker
-from app.sources import source_router
+from app.features import feature_modules
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 logger = logging.getLogger(__name__)
@@ -30,40 +28,35 @@ def create_app() -> FastAPI:
         settings = None
     build_id = resolve_build_id()
     ready = False
-    stop = Event()
-    worker: Thread | None = None
 
     async def initialize() -> None:
-        nonlocal ready, worker
+        nonlocal ready
         if settings is None:
             return
         try:
-            settings.validate_ingest()
             await asyncio.to_thread(
                 settings.data_dir.mkdir, parents=True, exist_ok=True
             )
             await asyncio.to_thread(db.run_migrations, settings.database_url)
-            if not stop.is_set():
-                started_worker = Thread(
-                    target=run_worker, args=(settings, stop), name="ingest"
-                )
-                started_worker.start()
-                worker = started_worker
         except Exception as error:
             logger.error("Initialization failed (%s)", type(error).__name__)
         else:
             ready = True
 
+    features = feature_modules()
+
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         task = asyncio.create_task(initialize())
         try:
-            yield
+            async with AsyncExitStack() as stack:
+                for feature in features:
+                    background = getattr(feature, "lifespan", None)
+                    if background is not None:
+                        await stack.enter_async_context(background(storage_settings))
+                yield
         finally:
-            stop.set()
             await task
-            if worker is not None:
-                await asyncio.to_thread(worker.join)
 
     application = FastAPI(lifespan=lifespan)
 
@@ -81,12 +74,15 @@ def create_app() -> FastAPI:
             },
         )
 
-    def source_settings() -> Settings:
+    def storage_settings() -> Settings:
         if not ready or settings is None:
-            raise HTTPException(503, "Source storage is unavailable")
+            raise HTTPException(503, "Storage is unavailable")
         return settings
 
-    application.include_router(source_router(source_settings))
+    for feature in features:
+        install = getattr(feature, "install", None)
+        if install is not None:
+            install(application, storage_settings)
 
     @application.get("/api/health")
     def health() -> JSONResponse:

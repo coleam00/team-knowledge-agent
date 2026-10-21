@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from app import db, jobs, main
 from app.config import Settings
+from app.features import f15_ingest
 from app.git import git
 from app.sources import Source, source_location
 from tests.handbook import ORIGIN, create_handbook_repo
@@ -28,7 +29,7 @@ def sources_client(
     monkeypatch: pytest.MonkeyPatch,
     client_factory: ClientFactory,
 ) -> Iterator[TestClient]:
-    monkeypatch.setattr(main, "run_worker", lambda settings, stop: None)
+    monkeypatch.setattr(f15_ingest, "run_worker", lambda settings, stop: None)
     monkeypatch.setenv("DATABASE_URL", database_url)
     with client_factory(main.create_app()) as client:
         wait_for_health(client, 200)

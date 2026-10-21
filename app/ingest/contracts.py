@@ -59,11 +59,12 @@ class CloneLimits:
     max_files: int
     max_total_bytes: int
     subprocess_timeout_seconds: float
+    max_file_bytes: int = 1_000_000
 
     def __post_init__(self) -> None:
         if any(
             type(value) is not int or value <= 0
-            for value in (self.max_files, self.max_total_bytes)
+            for value in (self.max_files, self.max_total_bytes, self.max_file_bytes)
         ):
             raise ValueError("File and byte limits must be positive integers")
         timeout = self.subprocess_timeout_seconds

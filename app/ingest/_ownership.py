@@ -177,7 +177,7 @@ class ProcessTree:
                     argv,
                     cwd=cwd,
                     env=env,
-                    stdin=subprocess.DEVNULL,
+                    stdin=subprocess.PIPE,
                     stdout=stdout,
                     stderr=stderr,
                     shell=False,
@@ -203,6 +203,8 @@ class ProcessTree:
             raise
         try:
             if self.job is not None:
+                assert self.proc.stdin is not None
+                self.proc.stdin.close()
                 self.job.assign(self.proc.pid)
                 self.job.resume(self.proc.pid)
             else:

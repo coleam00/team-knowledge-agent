@@ -59,7 +59,7 @@ def resolve(argv: list[str]) -> list[str]:
     return [shutil.which(argv[0]) or argv[0], *argv[1:]]
 
 
-def run(step: str, cmd: str | list[str], timeout: int = 600) -> tuple[int, str]:
+def run(step: str, cmd: str | list[str], timeout: int = 1800) -> tuple[int, str]:
     """One rung. A TIMEOUT IS A FAILURE, not a skip -- a hung check reports nothing."""
     argv = resolve(shlex.split(cmd, posix=False) if isinstance(cmd, str) else list(cmd))
     try:

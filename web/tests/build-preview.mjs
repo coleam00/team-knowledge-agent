@@ -13,7 +13,7 @@ await build({
     outDir: fileURLToPath(new URL('../../app/static/assets/verification', import.meta.url)),
     emptyOutDir: true,
     rolldownOptions: {
-      input: fileURLToPath(new URL('./states.html', import.meta.url)),
+      input: ['states.html', 'sources.html'].map(name => fileURLToPath(new URL(name, import.meta.url))),
     },
   },
 })

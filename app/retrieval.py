@@ -1,4 +1,5 @@
 import math
+from fractions import Fraction
 from urllib.parse import quote
 from uuid import UUID
 
@@ -33,8 +34,15 @@ class InvalidSearch(ValueError):
     pass
 
 
-def rrf_score(fts_rank: int | None, vector_rank: int | None) -> float:
-    return sum(1 / (60 + rank) for rank in (fts_rank, vector_rank) if rank is not None)
+def rrf_score(fts_rank: int | None, vector_rank: int | None) -> Fraction:
+    return sum(
+        (
+            Fraction(1, 60 + rank)
+            for rank in (fts_rank, vector_rank)
+            if rank is not None
+        ),
+        start=Fraction(),
+    )
 
 
 def citation(candidate: SearchCandidate, n: int) -> Citation:

@@ -1,4 +1,6 @@
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
+from fractions import Fraction
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -81,7 +83,80 @@ def settings(database_url: str, tmp_path: Path) -> Settings:
 
 def test_rrf_arithmetic() -> None:
     assert rrf_score(1, 2) == pytest.approx(1 / 61 + 1 / 62)
-    assert rrf_score(None, 1) == 1 / 61
+    assert rrf_score(None, 1) == pytest.approx(1 / 61)
+
+
+@pytest.mark.database
+@pytest.mark.parametrize(
+    "low,high",
+    [
+        ((12, 28), (6, 39)),
+        ((28, 12), (6, 39)),
+        ((12, 28), (39, 6)),
+        ((28, 12), (39, 6)),
+        ((30, 50), (39, 39)),
+        ((50, 30), (39, 39)),
+    ],
+)
+def test_exact_rrf_ties_use_uuid_before_limit(
+    settings: Settings, low: tuple[int, int], high: tuple[int, int]
+) -> None:
+    ranks = {1: low, 2: high}
+    lexical = [r for r in range(1, 51) if r not in (low[0], high[0])]
+    semantic = [r for r in range(1, 51) if r not in (low[1], high[1])]
+    ranks.update(enumerate(zip(lexical, semantic, strict=True), 3))
+    with db.connect(settings.database_url) as connection:
+        source = seed_source(connection)
+        for identity, (fts_rank, vector_rank) in ranks.items():
+            seed_chunk(
+                connection,
+                source,
+                identity,
+                content="deploy " * (51 - fts_rank),
+                vector=(1, vector_rank / 50),
+            )
+        candidates = hybrid_candidates(
+            connection,
+            "deploy",
+            query_embedding=[1, 0],
+            embedding_model="active",
+            min_similarity=0.25,
+        )
+        assert {c.id.int: (c.fts_rank, c.vector_rank) for c in candidates} == ranks
+    expected = sorted(
+        ranks, key=lambda i: (-sum(Fraction(1, 60 + r) for r in ranks[i]), i)
+    )
+    results = search(settings, "deploy", embedder=FixedEmbedder([1, 0]), limit=50)
+    assert [c.path for c in results] == [f"{i}.md" for i in expected]
+    boundary = expected.index(1) + 1
+    assert expected[boundary] == 2
+    limited = search(settings, "deploy", embedder=FixedEmbedder([1, 0]), limit=boundary)
+    assert limited == results[:boundary]
+    assert limited[-1].path == "1.md"
+
+
+@pytest.mark.database
+@pytest.mark.parametrize("mode", ["fake", "real"])
+def test_configured_similarity_changes_search_results(
+    settings: Settings, mode: str
+) -> None:
+    with db.connect(settings.database_url) as connection:
+        source = seed_source(connection)
+        seed_chunk(connection, source, 1, content="semantic", vector=(0.6, 0.8))
+        seed_chunk(
+            connection, source, 2, content="semantic", vector=(0.3, math.sqrt(0.91))
+        )
+    model = FixedEmbedder([1, 0])
+    configured = replace(settings, models_mode=mode)
+    defaults = search(configured, "deploy", embedder=model)
+    assert [c.path for c in defaults] == (
+        ["1.md", "2.md"] if mode == "fake" else ["1.md"]
+    )
+    included = search(replace(configured, min_similarity=0.5), "deploy", embedder=model)
+    assert [c.path for c in included] == ["1.md"]
+    assert (
+        search(replace(configured, min_similarity=0.8), "deploy", embedder=model) == []
+    )
 
 
 @pytest.mark.database

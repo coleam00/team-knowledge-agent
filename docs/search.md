@@ -8,6 +8,11 @@ and nonpositive or noninteger limits return 422. No matches returns `[]`.
 
 Each citation contains exactly these fields:
 
+`app.retrieval.Citation` owns this wire contract. The browser's
+`web/src/citation.ts` is derived from its serialization schema. After changing
+the schema, run `uv run python -m scripts.citation_type`; ordinary static checks
+reject a stale generated type before checking the browser's consumers.
+
 ```json
 {
   "n": 1,

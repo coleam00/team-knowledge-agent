@@ -44,8 +44,11 @@ def create_app() -> FastAPI:
             )
             await asyncio.to_thread(db.run_migrations, settings.database_url)
             if not stop.is_set():
-                worker = Thread(target=run_worker, args=(settings, stop), name="ingest")
-                worker.start()
+                started_worker = Thread(
+                    target=run_worker, args=(settings, stop), name="ingest"
+                )
+                started_worker.start()
+                worker = started_worker
         except Exception as error:
             logger.error("Initialization failed (%s)", type(error).__name__)
         else:

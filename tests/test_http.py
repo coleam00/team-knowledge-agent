@@ -170,6 +170,23 @@ def test_lifespan_starts_worker_after_migrations_and_joins_it(
     assert len(threads) == 1 and not threads[0].is_alive()
 
 
+def test_worker_start_failure_does_not_join_an_unstarted_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    client_factory: ClientFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    thread = Mock()
+    thread.start.side_effect = RuntimeError("credential-sentinel")
+    monkeypatch.setattr(main, "Thread", Mock(return_value=thread))
+    monkeypatch.setattr(db, "run_migrations", Mock())
+    with client_factory(main.create_app()) as client:
+        assert client.get("/api/health").status_code == 503
+    thread.start.assert_called_once()
+    thread.join.assert_not_called()
+    assert "Initialization failed (RuntimeError)" in caplog.text
+    assert "credential-sentinel" not in caplog.text
+
+
 @pytest.mark.parametrize("candidate", ["  candidate\n", "", "révision"])
 def test_http_candidate_is_exact_and_cached(
     monkeypatch: pytest.MonkeyPatch,

@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.handbook import FIXTURE, ORIGIN, create_handbook_repo, git
+from app.git import git
+from tests.handbook import FIXTURE, ORIGIN, create_handbook_repo
 
 FILES = {
     "README.md",

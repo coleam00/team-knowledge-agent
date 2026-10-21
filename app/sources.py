@@ -17,6 +17,7 @@ from pydantic import BaseModel, NonNegativeInt, StrictStr
 
 from app import db
 from app.config import Settings
+from app.git import git
 
 
 class SourceInput(BaseModel):
@@ -63,27 +64,6 @@ def github_location(url: str) -> SourceLocation:
     return SourceLocation(f"https://github.com/{owner}/{name}", owner, name)
 
 
-def local_git(repository: Path, *arguments: str) -> str:
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.upper().startswith("GIT_")
-    }
-    environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
-    # These read-only commands cannot run hooks, filters, or credential helpers.
-    result = subprocess.run(
-        ["git", "-c", f"core.hooksPath={os.devnull}", *arguments],
-        cwd=repository,
-        env=environment,
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=5,
-    )
-    return result.stdout.strip()
-
-
 def source_location(url: str, allow_local: bool) -> SourceLocation:
     if not url or any(ord(character) < 32 for character in url):
         raise ValueError(
@@ -98,14 +78,23 @@ def source_location(url: str, allow_local: bool) -> SourceLocation:
         raise ValueError("Network paths are not local Git sources")
     try:
         path = path.resolve(strict=True)
-        bare = local_git(path, "rev-parse", "--is-bare-repository") == "true"
-        root = local_git(
-            path, "rev-parse", "--absolute-git-dir" if bare else "--show-toplevel"
+        bare = git(path, "rev-parse", "--is-bare-repository", timeout=5) == "true"
+        root = git(
+            path,
+            "rev-parse",
+            "--absolute-git-dir" if bare else "--show-toplevel",
+            timeout=5,
         )
         if Path(root).resolve() != path:
             raise ValueError("Local source must be a Git repository root")
-        origin = local_git(
-            path, "config", "--local", "--no-includes", "--get", "remote.origin.url"
+        origin = git(
+            path,
+            "config",
+            "--local",
+            "--no-includes",
+            "--get",
+            "remote.origin.url",
+            timeout=5,
         )
     except (OSError, subprocess.SubprocessError, UnicodeError) as error:
         raise ValueError(

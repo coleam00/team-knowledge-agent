@@ -11,8 +11,9 @@ from fastapi.testclient import TestClient
 
 from app import db, main
 from app.config import Settings
+from app.git import git
 from app.sources import source_location
-from tests.handbook import ORIGIN, create_handbook_repo, git
+from tests.handbook import ORIGIN, create_handbook_repo
 from tests.test_http import ClientFactory, wait_for_health
 
 pytestmark = pytest.mark.database

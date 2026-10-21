@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 
 from app.config import Settings
+from app.git import git
 from app.ingest import (
     CloneLimits,
     CloneSelectError,
@@ -25,7 +26,7 @@ from app.ingest import repository as repository_module
 from app.ingest.git import GitRunner
 from app.ingest.repository import canonical_url
 from app.ingest.selection import path_language, select_files
-from tests.handbook import ORIGIN, create_handbook_repo, git
+from tests.handbook import ORIGIN, create_handbook_repo
 
 LIMITS = CloneLimits(100, 10_000_000, 30)
 PATHS = [

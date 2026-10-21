@@ -27,6 +27,14 @@ from tests.test_jobs import insert_source
 pytestmark = pytest.mark.database
 
 
+def select_documents(source: SourceSpec, **kwargs: object) -> SelectionResult:
+    files = tuple(
+        SelectedFile(f"document-{index}.txt", "b" * 40, "text", 6, "hello\n")
+        for index in range(5)
+    )
+    return SelectionResult(source.source_id, ORIGIN, "a" * 40, files)
+
+
 class BlockingEmbedder(FakeEmbedder):
     def __init__(self) -> None:
         self.entered = Event()
@@ -188,16 +196,15 @@ def test_http_async_complete_snapshot_two_workers_and_restart(
 def test_queued_job_survives_lifespan_and_runs_after_restart(
     settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
     client_factory: ClientFactory,
 ) -> None:
-    repository = create_handbook_repo(tmp_path)
+    monkeypatch.setattr(worker, "clone_and_select", select_documents)
     with monkeypatch.context() as held:
         held.setattr(main, "run_worker", lambda settings, stop: stop.wait(10))
         with client_factory(main.create_app()) as client:
             wait_for_health(client, 200)
             source = Source.model_validate(
-                client.post("/api/sources", json={"url": str(repository)}).json()
+                client.post("/api/sources", json={"url": ORIGIN}).json()
             )
             with db.connect(settings.database_url) as conn:
                 job_id = conn.execute("SELECT id FROM jobs").fetchone()
@@ -217,12 +224,17 @@ def test_failures_are_atomic_safe_and_worker_continues(
     caplog: pytest.LogCaptureFixture,
     failure: str,
 ) -> None:
-    repository = create_handbook_repo(tmp_path)
     if failure == "clone":
         repository = tmp_path / "bare"
         repository.mkdir()
         git(repository, "init", "--bare", "--template=")
         git(repository, "remote", "add", "origin", ORIGIN)
+        location = str(repository)
+        other_location = str(create_handbook_repo(tmp_path))
+    else:
+        monkeypatch.setattr(worker, "clone_and_select", select_documents)
+        location = ORIGIN
+        other_location = "https://github.com/acme/second"
     if failure == "embedding":
 
         class FailingEmbedder(FakeEmbedder):
@@ -268,7 +280,7 @@ def test_failures_are_atomic_safe_and_worker_continues(
     with client_factory(main.create_app()) as client:
         wait_for_health(client, 200)
         source = Source.model_validate(
-            client.post("/api/sources", json={"url": str(repository)}).json()
+            client.post("/api/sources", json={"url": location}).json()
         )
         failed = wait_source(client, source.id, "failed")
         assert failed.error and "credential-sentinel" not in failed.error
@@ -278,9 +290,8 @@ def test_failures_are_atomic_safe_and_worker_continues(
                 "SELECT status, error, started_at <= finished_at FROM jobs"
             ).fetchone() == ("failed", failed.error, True)
         assert client.get("/api/health").status_code == 200
-        other = create_handbook_repo(tmp_path)
         second = Source.model_validate(
-            client.post("/api/sources", json={"url": str(other)}).json()
+            client.post("/api/sources", json={"url": other_location}).json()
         )
         assert wait_source(client, second.id).file_count == 5
     assert "credential-sentinel" not in caplog.text
@@ -325,10 +336,10 @@ def test_configured_limits_fail_explicitly(
 
 
 def test_disconnected_old_worker_cannot_publish(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    repository = create_handbook_repo(tmp_path)
-    source_id = insert_source(settings.database_url or "", str(repository))
+    monkeypatch.setattr(worker, "clone_and_select", select_documents)
+    source_id = insert_source(settings.database_url or "")
     embedder = BlockingEmbedder()
     monkeypatch.setattr(worker, "get_embedder", lambda _: embedder)
     owner_pids = []
@@ -363,13 +374,12 @@ def test_disconnected_old_worker_cannot_publish(
 
 
 def test_shutdown_fails_owned_work_and_preserves_unclaimed_jobs(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    first = insert_source(
-        settings.database_url or "", str(create_handbook_repo(tmp_path))
-    )
+    monkeypatch.setattr(worker, "clone_and_select", select_documents)
+    first = insert_source(settings.database_url or "")
     second = insert_source(
-        settings.database_url or "", str(create_handbook_repo(tmp_path))
+        settings.database_url or "", "https://github.com/acme/second"
     )
     embedder = BlockingEmbedder()
     monkeypatch.setattr(worker, "get_embedder", lambda _: embedder)

@@ -7,7 +7,7 @@ Ask questions about your team's code and docs and get answers with citations. Bu
 The first increment provides the application page, database migrations, health,
 and build identity. Sources, indexing, search, answers, and MCP are not built yet.
 The model library provides deterministic fake embeddings and a quoting answerer.
-The app's HTTP routes do not call models yet; real model providers are not built.
+The app's HTTP routes do not call models yet.
 
 The model interfaces also provide configurable OpenRouter adapters. Real mode
 (the default) requires `OPENROUTER_API_KEY` at startup; use `TKA_MODELS=fake` for

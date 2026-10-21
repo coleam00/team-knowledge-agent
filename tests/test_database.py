@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -66,6 +67,92 @@ def test_initialization_and_restart_keep_versions_and_timestamps(
             ).fetchall()
             == before
         )
+
+
+@pytest.mark.database
+def test_files_migration_upgrades_existing_source_registry(
+    database_url: str, tmp_path: Path
+) -> None:
+    for name in ("0001_schema_migrations.sql", "0002_sources.sql"):
+        (tmp_path / name).write_bytes((db.MIGRATIONS / name).read_bytes())
+    db.run_migrations(database_url, tmp_path)
+    source_id = uuid4()
+    with db.connect(database_url) as connection:
+        connection.execute(
+            "INSERT INTO sources (id, url, owner, name) VALUES (%s, %s, %s, %s)",
+            (
+                source_id,
+                "https://github.com/tka-fixtures/handbook",
+                "tka-fixtures",
+                "handbook",
+            ),
+        )
+        source = connection.execute("SELECT * FROM sources").fetchone()
+        ledger = connection.execute(
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version"
+        ).fetchall()
+    db.run_migrations(database_url)
+    db.run_migrations(database_url)
+    with db.connect(database_url) as connection:
+        assert connection.execute("SELECT * FROM sources").fetchone() == source
+        assert (
+            connection.execute(
+                "SELECT version, applied_at FROM schema_migrations "
+                "WHERE version <= 2 ORDER BY version"
+            ).fetchall()
+            == ledger
+        )
+        assert connection.execute(
+            "SELECT version FROM schema_migrations ORDER BY version"
+        ).fetchall() == [(1,), (2,), (3,)]
+        connection.execute(
+            "INSERT INTO files (id, source_id, path, blob_sha, language) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (uuid4(), source_id, "README.md", "a" * 40, "markdown"),
+        )
+        assert connection.execute("SELECT source_id FROM files").fetchone() == (
+            source_id,
+        )
+
+
+@pytest.mark.database
+def test_files_persist_with_source_path_uniqueness(database_url: str) -> None:
+    db.run_migrations(database_url)
+    source_id, other_source = uuid4(), uuid4()
+    records = [
+        (uuid4(), source_id, "docs/caf\u00e9.md", "a" * 40, "markdown"),
+        (uuid4(), other_source, "docs/caf\u00e9.md", "b" * 64, "markdown"),
+        (uuid4(), source_id, "src/keys.py", "c" * 40, "python"),
+    ]
+    insert = (
+        "INSERT INTO files (id, source_id, path, blob_sha, language) "
+        "VALUES (%s, %s, %s, %s, %s)"
+    )
+    with db.connect(database_url) as connection:
+        for record in records:
+            connection.execute(insert, record)
+    db.run_migrations(database_url)
+    with db.connect(database_url) as connection:
+        assert set(
+            connection.execute(
+                "SELECT id, source_id, path, blob_sha, language FROM files"
+            ).fetchall()
+        ) == set(records)
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            with connection.transaction():
+                connection.execute(insert, (uuid4(), *records[0][1:]))
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            with connection.transaction():
+                connection.execute(
+                    insert,
+                    (records[0][0], other_source, "new.md", "d" * 40, "markdown"),
+                )
+        for field in range(5):
+            missing: list[object] = [uuid4(), uuid4(), "new.md", "d" * 40, "markdown"]
+            missing[field] = None
+            with pytest.raises(psycopg.errors.NotNullViolation):
+                with connection.transaction():
+                    connection.execute(insert, missing)
 
 
 @pytest.mark.database

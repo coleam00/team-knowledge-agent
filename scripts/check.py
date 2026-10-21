@@ -19,8 +19,8 @@ def main() -> int:
     python = sys.executable
     commands = (
         [
-            [python, "-m", "ruff", "check", "app", "scripts", "tests"],
-            [python, "-m", "ruff", "format", "--check", "app", "scripts", "tests"],
+            [python, "-m", "ruff", "check", "."],
+            [python, "-m", "ruff", "format", "--check", "."],
             [python, "-m", "mypy"],
             [npm, "run", "lint", "--prefix", "web"],
             [npm, "run", "typecheck", "--prefix", "web"],

@@ -80,7 +80,7 @@ def chunk_text(
 ) -> list[SourceChunk]:
     """Preserve exact input text; Markdown overlap stays within ATX sections.
 
-    See docs/chunking.md for the supported heading/fence grammar and provisional
+    See docs/chunking.md for the supported heading/fence grammar and approved
     size defaults. Callers must preserve newlines when decoding source files.
     """
     if kind not in ("text", "markdown"):

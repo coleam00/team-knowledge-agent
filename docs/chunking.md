@@ -99,10 +99,13 @@ whole file before windowing. A window can split a fenced block or lack a heading
 or opening fence; exact contiguous source ranges take precedence over rendering
 each snippet independently.
 
-## Provisional defaults (MISSION Q1)
+## Approved defaults (MISSION Q1)
 
 The default window of **80 lines** and overlap of **10 lines**, for both modes,
-are proposals under MISSION Q1. They bound line count with 12.5% overlap, but are
-not tuned or approved for retrieval quality. Human review is required at merge
-for these proposed defaults. Both parameters remain caller-controlled, and the
-correctness tests cover explicit sizes independently of these defaults.
+were proposed under MISSION Q1 and approved by the owner on 2026-10-21 in
+[issue #8](https://github.com/coleam00/team-knowledge-agent/issues/8#issuecomment-6312041512).
+The decision is recorded in MISSION.md. Markdown still splits on headings first.
+These defaults bound line count with 12.5% overlap; retrieval-quality tuning is
+deferred until real answer-quality evidence is available. Both parameters remain
+caller-controlled, and correctness tests cover explicit sizes independently of
+these defaults.

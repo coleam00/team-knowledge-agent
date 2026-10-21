@@ -67,6 +67,10 @@ Timeouts terminate and reap the owned command and terminate its descendants;
 cleanup is also performed on success and exceptions. Cleanup has its own bounded
 wait, so a 0.01-second command timeout is not a 10 ms wall-clock guarantee.
 
+`process_ownership.py` owns the platform lifecycle shared with the factory runtime
+host. Ingest keeps its Git environment, deadline, byte collection and error mapping.
+Runtime snapshots that include `app/` must also include `process_ownership.py`.
+
 ## Exact matching rules
 
 Rules match case-insensitively but preserve original path spelling. Paths must

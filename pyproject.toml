@@ -22,7 +22,7 @@ package = false
 
 [tool.ruff]
 target-version = "py312"
-include = ["app/**/*.py", "scripts/**/*.py", "tests/**/*.py"]
+include = ["app/**/*.py", "scripts/**/*.py", "tests/**/*.py", "process_ownership.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -30,7 +30,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["app", "scripts", "tests"]
+files = ["app", "scripts", "tests", "process_ownership.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

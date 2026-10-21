@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+import process_ownership
 from app.config import Settings
 from app.ingest import (
     CloneLimits,
@@ -690,11 +691,15 @@ def test_timeout_terminates_owned_command(tmp_path: Path) -> None:
 def test_timeout_terminates_descendants(tmp_path: Path) -> None:
     sentinel = tmp_path / "late-write"
     started = tmp_path / "started"
-    child = (
-        "import time; from pathlib import Path; "
-        f"Path({str(started)!r}).touch(); time.sleep(2); "
-        f"Path({str(sentinel)!r}).touch()"
-    )
+    release = tmp_path / "release"
+    child = f"""
+import time
+from pathlib import Path
+Path({str(started)!r}).touch()
+while not Path({str(release)!r}).exists():
+    time.sleep(0.01)
+Path({str(sentinel)!r}).touch()
+"""
     parent = (
         "import subprocess, sys, time; "
         f"subprocess.Popen([sys.executable, '-c', {child!r}]); time.sleep(60)"
@@ -704,9 +709,10 @@ def test_timeout_terminates_descendants(tmp_path: Path) -> None:
             [sys.executable, "-c", parent],
             cwd=tmp_path,
             env=os.environ.copy(),
-            timeout=1,
+            timeout=5,
         )
     assert started.exists(), "Descendant must start for this test to prove cleanup"
+    release.touch()
     time.sleep(2)
     assert not sentinel.exists()
 
@@ -911,7 +917,9 @@ def test_failed_job_assignment_never_launches_command(
 ) -> None:
     if sys.platform == "win32":
         monkeypatch.setattr(
-            _process._Job, "assign", Mock(side_effect=OSError("assignment failed"))
+            process_ownership._Job,
+            "assign",
+            Mock(side_effect=OSError("assignment failed")),
         )
     sentinel = tmp_path / "should-not-exist"
     command = f"from pathlib import Path; Path({str(sentinel)!r}).touch()"

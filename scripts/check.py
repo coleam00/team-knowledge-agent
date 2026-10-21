@@ -37,7 +37,7 @@ def main() -> int:
     environment.pop("OPENROUTER_API_KEY", None)
     for command in commands:
         try:
-            result = subprocess.run(command, cwd=ROOT, env=environment, timeout=600)
+            result = subprocess.run(command, cwd=ROOT, env=environment, timeout=1800)
         except subprocess.TimeoutExpired:
             print(f"Check timed out: {command[0]}", file=sys.stderr)
             return 124

@@ -6,7 +6,8 @@ Ask questions about your team's code and docs and get answers with citations. Bu
 
 The first increment provides the application page, database migrations, health,
 and build identity. Sources, indexing, search, answers, and MCP are not built yet.
-No models are called, including in `TKA_MODELS=fake` mode.
+The model library provides deterministic fake embeddings and a quoting answerer.
+The app's HTTP routes do not call models yet; real model providers are not built.
 
 Install Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 22 LTS (22.13 or
 newer), and Git. Run these commands from the checkout root:
@@ -58,9 +59,26 @@ an older app refuses readiness when the database contains unknown versions.
 value when set (even if empty), otherwise this checkout's Git commit, otherwise
 `unknown`. `TKA_BUILD_ID` is not used. Identity is fixed at application creation.
 
-The data directory resolves from nonempty `TKA_DATA_DIR`, then nonempty
-`FACTORY_RUNTIME_STATE`, then `./.tka-data`. Relative paths use the working
-directory; `~` is expanded. Startup creates the directory; cloning is not built.
+## Environment variables
+
+Set configuration in the process environment before starting the app. Keep
+credentials out of source files and command output.
+
+| Variable | Current behavior |
+|---|---|
+| `DATABASE_URL` | Connection URL for the existing Postgres database. Required for readiness; unset or empty leaves health unavailable. Startup runs migrations, but never starts a database server. |
+| `TKA_DATA_DIR` | Data directory. A nonempty value takes precedence over `FACTORY_RUNTIME_STATE`, then `./.tka-data`. Relative paths use the working directory; `~` is expanded. Startup creates the directory; cloning is not built. |
+| `FACTORY_RUNTIME_STATE` | Data-directory fallback when `TKA_DATA_DIR` is unset or empty. An unset or empty fallback uses `./.tka-data`. |
+| `FACTORY_RUNTIME_CANDIDATE` | Exact build identity when set, including an empty value; otherwise the Git commit, then `unknown`, as described above. There is no `TKA_BUILD_ID` override. |
+| `TKA_MODELS` | Model-library mode, default `real`. Set `fake` for deterministic offline embeddings and a quoting answerer; no key is needed. Model factories reject unknown modes and raise `NotImplementedError` for `real` until providers are built. The current HTTP routes do not call the factories. Tests and runtime checks use `fake`. |
+
+The following settings belong to later increments in [the runtime contract](docs/prd.md#4-stack-and-runtime-contract-decided):
+
+| Variable | Planned use and availability |
+|---|---|
+| `OPENROUTER_API_KEY` | Environment-only credential for future real-mode model calls. Not read by the current app; never supply it to CI or runtime checks. |
+| `TKA_CHAT_MODEL`, `TKA_EMBEDDING_MODEL` | Future OpenRouter model selection; not read by the current app. |
+| `TKA_ALLOW_LOCAL_SOURCES=1` | Future opt-in for local Git sources in tests and runtime checks, off by default. Source ingestion is not built, so this currently enables no source API. |
 
 ## Checks
 
@@ -95,3 +113,26 @@ supplied database migrated. `--output PATH` also saves the observations as JSON.
 GitHub Actions workflow `ci` has Linux `backend`, `frontend`, and `smoke` jobs;
 database jobs use `pgvector/pgvector:pg17`. Shared runtime and independent holdout
 verification remain separate from these ordinary checks.
+
+## Repository standards and Port reporting
+
+Root `CODEOWNERS` mirrors Port owner `factory_team` (Factory Team) through
+`@coleam00`. The [pull request template](.github/pull_request_template.md) requests
+command results and evidence paths in the PR text.
+
+Port's GitHub integration reads `README.md`, `.gitignore`, `CODEOWNERS`,
+`.github/pull_request_template.md`, and `.github/workflows/ci.yml` from the default
+branch at those exact paths. Keep the workflow name `ci` and its `backend`,
+`frontend`, and `smoke` check names.
+
+The existing [`port-ci-status`](.github/workflows/port-ci-status.yml) workflow runs
+when `ci` completes on `main`. Using repository secrets `PORT_CLIENT_ID` and
+`PORT_CLIENT_SECRET`, it writes the conclusion to the repository's `ci_main_status`
+property in Port, then requests a `github-ocean` resync to refresh file and PR
+inputs. A resync request failure emits a warning after the status was reported;
+Port also resyncs on its own schedule. These secrets configure the reporter, not
+the app.
+
+These files provide repository-side readiness prerequisites. A successful report
+or resync request alone does not establish an observed Gold score; that requires
+Port's refreshed scorecard results.

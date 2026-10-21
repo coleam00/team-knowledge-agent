@@ -104,7 +104,7 @@ def test_files_migration_upgrades_existing_source_registry(
         )
         assert connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
-        ).fetchall() == [(1,), (2,), (3,)]
+        ).fetchall() == [(version,) for version, _ in db.migration_files(db.MIGRATIONS)]
         connection.execute(
             "INSERT INTO files (id, source_id, path, blob_sha, language) "
             "VALUES (%s, %s, %s, %s, %s)",

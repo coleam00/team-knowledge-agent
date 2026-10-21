@@ -75,6 +75,10 @@ def test_edit_delete_and_rename_preserve_original_commit(tmp_path: Path) -> None
     original = fixture_bytes()
     repository = create_handbook_repo(tmp_path)
     before = git(repository, "rev-parse", "HEAD")
+    original_blobs = {
+        name: git(repository, "hash-object", "--no-filters", name)
+        for name in ("docs/deploy.md", "docs/legacy-deploy.md", "docs/onboarding.md")
+    }
     updated = "# Deployment guide\n\nDeploys are frozen on Fridays after 12:00 UTC.\n"
     (repository / "docs/deploy.md").write_text(updated, encoding="utf-8", newline="\n")
     (repository / "docs/legacy-deploy.md").unlink()
@@ -86,13 +90,12 @@ def test_edit_delete_and_rename_preserve_original_commit(tmp_path: Path) -> None
     assert git(repository, "rev-parse", "HEAD^") == before
     assert git(repository, "rev-list", "--count", "HEAD") == "2"
     assert git(repository, "status", "--porcelain") == ""
-    for name in ("docs/deploy.md", "docs/legacy-deploy.md", "docs/onboarding.md"):
-        assert git(repository, "show", f"{before}:{name}") == (
-            original[name].decode("utf-8").strip()
-        )
+    for name, blob in original_blobs.items():
+        assert git(repository, "rev-parse", f"{before}:{name}") == blob
     assert git(repository, "show", f"{after}:docs/deploy.md") == updated.strip()
-    assert git(repository, "show", f"{after}:docs/getting-started.md") == (
-        original["docs/onboarding.md"].decode("utf-8").strip()
+    assert (
+        git(repository, "rev-parse", f"{after}:docs/getting-started.md")
+        == original_blobs["docs/onboarding.md"]
     )
     assert set(git(repository, "ls-tree", "-r", "--name-only", after).splitlines()) == (
         FILES - {"docs/legacy-deploy.md", "docs/onboarding.md"}

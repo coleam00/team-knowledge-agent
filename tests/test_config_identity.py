@@ -1,4 +1,5 @@
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -6,6 +7,56 @@ import pytest
 
 from app import build_id
 from app.config import Settings
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("TKA_INGEST_MAX_FILES", "0"),
+        ("TKA_INGEST_MAX_TOTAL_BYTES", "-1"),
+        ("TKA_INGEST_COMMAND_TIMEOUT_SECONDS", "nan"),
+        ("TKA_INGEST_COMMAND_TIMEOUT_SECONDS", "inf"),
+        ("TKA_INGEST_COMMAND_TIMEOUT_SECONDS", "0"),
+        ("TKA_CHUNK_WINDOW_LINES", "0"),
+        ("TKA_CHUNK_OVERLAP_LINES", "80"),
+        ("TKA_CHUNK_OVERLAP_LINES", "-1"),
+    ],
+)
+def test_invalid_ingest_configuration(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError):
+        Settings.from_env()
+
+
+def test_ingest_configuration_bindings_and_direct_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name, value in {
+        "TKA_INGEST_MAX_FILES": "12",
+        "TKA_INGEST_MAX_TOTAL_BYTES": "345",
+        "TKA_INGEST_COMMAND_TIMEOUT_SECONDS": "1.5",
+        "TKA_CHUNK_WINDOW_LINES": "4",
+        "TKA_CHUNK_OVERLAP_LINES": "1",
+    }.items():
+        monkeypatch.setenv(name, value)
+    settings = Settings.from_env()
+    assert (
+        settings.ingest_max_files,
+        settings.ingest_max_total_bytes,
+        settings.ingest_command_timeout_seconds,
+        settings.chunk_window_lines,
+        settings.chunk_overlap_lines,
+    ) == (12, 345, 1.5, 4, 1)
+    for invalid in (
+        replace(settings, ingest_max_files=True),
+        replace(settings, chunk_window_lines=0),
+        replace(settings, chunk_overlap_lines=True),
+        replace(settings, ingest_command_timeout_seconds=False),
+    ):
+        with pytest.raises(ValueError):
+            invalid.validate_ingest()
 
 
 @pytest.mark.parametrize(

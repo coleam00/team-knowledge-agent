@@ -68,6 +68,8 @@ def test_initialization_failure_is_sticky_and_secret_safe(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     migration = Mock(side_effect=RuntimeError("credential-sentinel"))
+    worker = Mock()
+    monkeypatch.setattr(main, "run_worker", worker)
     monkeypatch.setattr(db, "run_migrations", migration)
     with client_factory(main.create_app()) as client:
         response = client.get("/api/health")
@@ -75,6 +77,7 @@ def test_initialization_failure_is_sticky_and_secret_safe(
         assert "credential-sentinel" not in response.text
         assert client.get("/api/build-id").status_code == 200
     migration.assert_called_once()
+    worker.assert_not_called()
     assert "Initialization failed (RuntimeError)" in caplog.text
     assert "credential-sentinel" not in caplog.text
 
@@ -121,6 +124,8 @@ def test_shutdown_waits_for_initialization(
         finished.set()
 
     monkeypatch.setattr(db, "run_migrations", migrate)
+    worker = Mock()
+    monkeypatch.setattr(main, "run_worker", worker)
     client = client_factory(main.create_app())
     client.__enter__()
     try:
@@ -134,8 +139,35 @@ def test_shutdown_waits_for_initialization(
                 release.set()
             closing.result(timeout=5)
             assert finished.is_set()
+            worker.assert_not_called()
     finally:
         release.set()
+
+
+def test_lifespan_starts_worker_after_migrations_and_joins_it(
+    monkeypatch: pytest.MonkeyPatch, client_factory: ClientFactory
+) -> None:
+    migrated, entered, finished = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+    threads = []
+
+    def run_worker(settings: object, stop: threading.Event) -> None:
+        assert migrated.is_set()
+        threads.append(threading.current_thread())
+        entered.set()
+        assert stop.wait(5)
+        finished.set()
+
+    monkeypatch.setattr(db, "run_migrations", lambda _: migrated.set())
+    monkeypatch.setattr(main, "run_worker", run_worker)
+    with client_factory(main.create_app()):
+        assert entered.wait(5)
+        assert not finished.is_set()
+    assert finished.is_set()
+    assert len(threads) == 1 and not threads[0].is_alive()
 
 
 @pytest.mark.parametrize("candidate", ["  candidate\n", "", "révision"])

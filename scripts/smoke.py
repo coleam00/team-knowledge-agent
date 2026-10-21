@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -13,13 +14,14 @@ from pathlib import Path
 
 import httpx
 
+from app.chunking import chunk_text
 from app.config import Settings
 from app.db import MIGRATIONS, connect, migration_files
 from app.git import git
-from app.ingest import CloneLimits, SourceSpec, clone_and_select
+from app.models.fake import FakeEmbedder
 from app.sources import Source
 from app.text_lines import physical_lines
-from tests.handbook import create_handbook_repo
+from tests.handbook import ORIGIN, create_handbook_repo
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -142,6 +144,10 @@ def absent_features(client: httpx.Client) -> list[dict[str, object]]:
 
 def register_handbook(client: httpx.Client, state: Path) -> Source:
     repository = create_handbook_repo(state)
+    deploy = repository / "docs/deploy.md"
+    deploy.write_bytes(deploy.read_bytes() + b"\nRange line 17\nRange line 18\nTail\n")
+    git(repository, "add", "--force", ".")
+    git(repository, "commit", "-m", "Prepare five-line fetch range")
     response = client.post("/api/sources", json={"url": str(repository)})
     assert response.status_code == 202
     source = Source.model_validate(response.json())
@@ -151,7 +157,6 @@ def register_handbook(client: httpx.Client, state: Path) -> Source:
     assert source.indexed_commit is None
     assert source.indexed_at is None
     assert source.error is None
-    assert client.get(f"/api/sources/{source.id}").json() == response.json()
     duplicate = client.post("/api/sources", json={"url": str(repository)})
     assert duplicate.status_code == 409
     assert duplicate.json()["id"] == str(source.id)
@@ -162,79 +167,162 @@ def register_handbook(client: httpx.Client, state: Path) -> Source:
     return source
 
 
+def wait_for_source(
+    client: httpx.Client, source: Source, status: str = "ready"
+) -> Source:
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/sources/{source.id}")
+        assert response.status_code == 200
+        current = Source.model_validate(response.json())
+        if current.status == status:
+            return current
+        assert current.status != "failed", current.error
+        time.sleep(0.1)
+    raise TimeoutError("Source did not finish indexing within 45 seconds")
+
+
+def verify_snapshot(source: Source, settings: Settings) -> dict[str, object]:
+    assert source.status == "ready"
+    assert source.indexed_commit == git(Path(source.url), "rev-parse", "HEAD")
+    embedder = FakeEmbedder()
+    with connect(settings.database_url) as connection:
+        files = connection.execute(
+            "SELECT path, language FROM files WHERE source_id = %s ORDER BY path",
+            (source.id,),
+        ).fetchall()
+        assert len(files) == source.file_count
+        expected = []
+        for path, language in files:
+            text = (Path(source.url) / path).read_bytes().decode("utf-8")
+            expected.extend(
+                chunk_text(
+                    path,
+                    text,
+                    kind="markdown" if language == "markdown" else "text",
+                    window_lines=settings.chunk_window_lines,
+                    overlap_lines=settings.chunk_overlap_lines,
+                )
+            )
+        chunks = connection.execute(
+            "SELECT path, start_line, end_line, content, embedding::real[], "
+            "embedding_model FROM chunks WHERE source_id = %s "
+            "ORDER BY path, start_line",
+            (source.id,),
+        ).fetchall()
+        assert len(chunks) == source.chunk_count == len(expected)
+        for stored, wanted in zip(chunks, expected, strict=True):
+            assert stored[:4] == (
+                wanted.path,
+                wanted.start_line,
+                wanted.end_line,
+                wanted.content,
+            )
+            vector = embedder.embed(wanted.content)
+            assert len(stored[4]) == len(vector)
+            assert all(
+                abs(a - b) < 1e-6 for a, b in zip(stored[4], vector, strict=True)
+            )
+            assert stored[5] == embedder.model_id
+        job = connection.execute(
+            "SELECT id, status, started_at, finished_at, error FROM jobs "
+            "WHERE source_id = %s",
+            (source.id,),
+        ).fetchall()
+        assert len(job) == 1
+        job_id, status, started, finished, error = job[0]
+        assert status == "ready" and error is None
+        assert (
+            source.indexed_at is not None and started <= source.indexed_at <= finished
+        )
+    return {
+        "source": source.model_dump(mode="json"),
+        "job_id": str(job_id),
+        "started_at": started.isoformat(),
+        "finished_at": finished.isoformat(),
+        "exact_chunks_and_vectors": True,
+        "embedding_model": embedder.model_id,
+    }
+
+
+def index_rows(database_url: str) -> list[list[object]]:
+    with connect(database_url) as connection:
+        return [
+            list(row)
+            for row in connection.execute(
+                "SELECT row_to_json(t)::text FROM ("
+                "SELECT 'chunk' AS kind, to_jsonb(c) AS value FROM chunks c "
+                "UNION ALL SELECT 'job', to_jsonb(j) FROM jobs j"
+                ") t ORDER BY kind, value->>'id'"
+            )
+        ]
+
+
 def verify_indexed_file_reads(
     client: httpx.Client,
     source: Source,
     settings: Settings,
     observations: dict[str, object],
 ) -> Source:
-    spec = SourceSpec(source.id, source.url)
-    limits = CloneLimits(100, 10_000_000, 30)
+    source = wait_for_source(client, source)
+    assert source.file_count == 5
+    observations["indexing"] = verify_snapshot(source, settings)
     repository = Path(source.url)
-    deploy = repository / "docs/deploy.md"
-    deploy.write_bytes(deploy.read_bytes() + b"\nRange line 17\nRange line 18\nTail\n")
-    git(repository, "add", "--force", ".")
-    git(repository, "commit", "-m", "Prepare five-line fetch range")
-    first = clone_and_select(spec, settings=settings, limits=limits)
-    with connect(settings.database_url) as connection:
-        connection.execute(
-            "UPDATE sources SET indexed_commit = %s WHERE id = %s",
-            (first.commit_sha, source.id),
-        )
+    first_commit = source.indexed_commit
     url = f"/api/sources/{source.id}/file"
-    expected = next(
-        file.content for file in first.files if file.path == "docs/deploy.md"
-    )
-    renamed_content = next(
-        file.content for file in first.files if file.path == "docs/onboarding.md"
-    )
+    expected = (repository / "docs/deploy.md").read_bytes().decode("utf-8")
+    renamed_content = (repository / "docs/onboarding.md").read_bytes().decode("utf-8")
     full = client.get(url, params={"path": "docs/deploy.md"})
     assert full.status_code == 200
     assert full.json()["content"] == expected
-    assert full.json()["commit"] == first.commit_sha
+    assert full.json()["commit"] == first_commit
     (repository / "docs/deploy.md").write_bytes(b"Updated deployment at C2\n")
     (repository / "docs/legacy-deploy.md").unlink()
     (repository / "docs/onboarding.md").rename(repository / "docs/start.md")
     git(repository, "add", "--force", ".")
     git(repository, "commit", "-m", "Update smoke handbook")
-    second = clone_and_select(spec, settings=settings, limits=limits)
+    second_commit = git(repository, "rev-parse", "HEAD")
     (repository / "docs/deploy.md").write_bytes(b"Uncommitted working content")
     assert client.get(url, params={"path": "docs/deploy.md"}).json() == full.json()
     window = client.get(url, params={"path": "docs/deploy.md", "start": 14, "end": 18})
     assert window.status_code == 200
     assert window.json()["content"] == "".join(physical_lines(expected)[13:18])
     assert len(physical_lines(window.json()["content"])) == 5
-    assert window.json()["commit"] == first.commit_sha
+    assert window.json()["commit"] == first_commit
     assert (window.json()["start_line"], window.json()["end_line"]) == (14, 18)
     clipped = client.get(url, params={"path": "docs/deploy.md", "end": 999})
     assert clipped.status_code == 200 and clipped.json() == full.json()
     for path in ("docs/legacy-deploy.md", "docs/onboarding.md"):
         old = client.get(url, params={"path": path})
-        assert old.status_code == 200 and old.json()["commit"] == first.commit_sha
-    with connect(settings.database_url) as connection:
-        connection.execute(
-            "UPDATE sources SET indexed_commit = %s WHERE id = %s",
-            (second.commit_sha, source.id),
-        )
+        assert old.status_code == 200 and old.json()["commit"] == first_commit
+    copy = repository.parent / "updated-handbook"
+    shutil.copytree(repository, copy)
+    (copy / "docs/deploy.md").write_bytes(b"Updated deployment at C2\n")
+    response = client.post("/api/sources", json={"url": str(copy)})
+    assert response.status_code == 202
+    second = wait_for_source(client, Source.model_validate(response.json()))
+    assert second.file_count == 4 and second.indexed_commit == second_commit
+    observations["second_snapshot"] = verify_snapshot(second, settings)
+    url = f"/api/sources/{second.id}/file"
     for path in ("docs/legacy-deploy.md", "docs/onboarding.md"):
         assert client.get(url, params={"path": path}).status_code == 404
     renamed = client.get(url, params={"path": "docs/start.md"})
-    assert renamed.status_code == 200 and renamed.json()["commit"] == second.commit_sha
+    assert renamed.status_code == 200 and renamed.json()["commit"] == second_commit
     assert renamed.json()["content"] == renamed_content
     edited = client.get(url, params={"path": "docs/deploy.md"})
     assert edited.status_code == 200
     assert edited.json()["content"] == "Updated deployment at C2\n"
-    assert edited.json()["commit"] == second.commit_sha
+    assert edited.json()["commit"] == second_commit
     observations["indexed_file_reads"] = {
-        "setup": "acquisition library and indexed_commit record updates; no worker",
+        "setup": "HTTP registration and background indexing of two distinct sources",
         "source_id": str(source.id),
-        "commit_c": first.commit_sha,
-        "commit_c2": second.commit_sha,
+        "commit_c": first_commit,
+        "commit_c2": second_commit,
         "full_file_at_c": True,
         "range_at_c": [14, 18],
         "range_response": window.json(),
         "eof_clipped": True,
-        "pinned_after_acquiring_c2": True,
+        "pinned_after_upstream_c2": True,
         "deleted_and_renamed_old_paths": 404,
         "new_path_status": 200,
         "renamed_response": renamed.json(),
@@ -296,6 +384,19 @@ def verify(observations: dict[str, object]) -> None:
             }
             observations["assets"] = inspect_page(client)
             assert client.get("/api/sources").json() == []
+            bare = Path(state) / "unsupported-bare"
+            bare.mkdir()
+            git(bare, "init", "--bare", "--template=")
+            git(bare, "remote", "add", "origin", ORIGIN)
+            failure_response = client.post("/api/sources", json={"url": str(bare)})
+            assert failure_response.status_code == 202
+            failed = wait_for_source(
+                client, Source.model_validate(failure_response.json()), "failed"
+            )
+            assert failed.error and failed.indexed_commit is None
+            assert failed.file_count == failed.chunk_count == 0
+            assert client.get("/api/health").status_code == 200
+            observations["clone_failure"] = failed.model_dump(mode="json")
             source = register_handbook(client, Path(state))
             source = verify_indexed_file_reads(
                 client,
@@ -308,16 +409,14 @@ def verify(observations: dict[str, object]) -> None:
                 ),
                 observations,
             )
-            second = register_handbook(client, Path(state))
-            assert source.id != second.id
-            sources = [item.model_dump(mode="json") for item in (source, second)]
-            assert client.get("/api/sources").json() == sources
+            sources = client.get("/api/sources").json()
             observations["sources_before_restart"] = sources
             observations["source_before_restart"] = source.model_dump(mode="json")
-            observations["indexing"] = {
-                "stage": "not yet built",
-                "observed_status": source.status,
-            }
+            rows_before = index_rows(database_url)
+            observations["index_rows_before_restart"] = rows_before
+            expected_file = client.get(
+                f"/api/sources/{source.id}/file", params={"path": "docs/deploy.md"}
+            ).json()
             observations["unbuilt_features"] = absent_features(client)
             before = ledger(database_url)
             observations["ledger_before_restart"] = before
@@ -326,6 +425,9 @@ def verify(observations: dict[str, object]) -> None:
             after = ledger(database_url)
             assert after == before
             observations["ledger_after_restart"] = after
+            rows_after = index_rows(database_url)
+            assert rows_after == rows_before
+            observations["index_rows_after_restart"] = rows_after
             persisted = client.get(f"/api/sources/{source.id}")
             assert persisted.status_code == 200
             assert persisted.json() == source.model_dump(mode="json")
@@ -338,7 +440,7 @@ def verify(observations: dict[str, object]) -> None:
             )
             assert file.status_code == 200
             assert file.json()["commit"] == source.indexed_commit
-            assert file.json()["content"] == "Updated deployment at C2\n"
+            assert file.json() == expected_file
             observations["indexed_file_after_restart"] = {
                 "status": 200,
                 "commit": file.json()["commit"],

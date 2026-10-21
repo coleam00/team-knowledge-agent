@@ -3,6 +3,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from threading import Event, Thread
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -12,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app import db
 from app.build_id import resolve_build_id
 from app.config import ModelConfigurationError, Settings
+from app.ingest.worker import run_worker
 from app.sources import source_router
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -28,16 +30,22 @@ def create_app() -> FastAPI:
         settings = None
     build_id = resolve_build_id()
     ready = False
+    stop = Event()
+    worker: Thread | None = None
 
     async def initialize() -> None:
-        nonlocal ready
+        nonlocal ready, worker
         if settings is None:
             return
         try:
+            settings.validate_ingest()
             await asyncio.to_thread(
                 settings.data_dir.mkdir, parents=True, exist_ok=True
             )
             await asyncio.to_thread(db.run_migrations, settings.database_url)
+            if not stop.is_set():
+                worker = Thread(target=run_worker, args=(settings, stop), name="ingest")
+                worker.start()
         except Exception as error:
             logger.error("Initialization failed (%s)", type(error).__name__)
         else:
@@ -49,7 +57,10 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
+            stop.set()
             await task
+            if worker is not None:
+                await asyncio.to_thread(worker.join)
 
     application = FastAPI(lifespan=lifespan)
 

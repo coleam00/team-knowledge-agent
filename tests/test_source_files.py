@@ -38,6 +38,7 @@ class FileClient:
 def file_client(
     monkeypatch: pytest.MonkeyPatch, client_factory: ClientFactory
 ) -> Iterator[FileClient]:
+    monkeypatch.setattr(main, "run_worker", lambda settings, stop: None)
     source_id = uuid4()
     row: dict[str, object] = {
         "id": source_id,
@@ -279,6 +280,7 @@ def test_registry_cache_http_lifecycle(
     tmp_path: Path,
     client_factory: ClientFactory,
 ) -> None:
+    monkeypatch.setattr(main, "run_worker", lambda settings, stop: None)
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("TKA_ALLOW_LOCAL_SOURCES", "1")
     repository = create_handbook_repo(tmp_path)

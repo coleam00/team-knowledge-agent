@@ -1,3 +1,4 @@
+import math
 import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -24,6 +25,30 @@ class Settings:
     chat_model: str = "anthropic/claude-sonnet-5.5"
     embedding_model: str = "openai/text-embedding-3-small"
     allow_local_sources: bool = False
+    ingest_max_files: int = 5000
+    ingest_max_total_bytes: int = 200000000
+    ingest_command_timeout_seconds: float = 120
+    chunk_window_lines: int = 80
+    chunk_overlap_lines: int = 10
+
+    def validate_ingest(self) -> None:
+        for value in (
+            self.ingest_max_files,
+            self.ingest_max_total_bytes,
+            self.chunk_window_lines,
+        ):
+            if type(value) is not int or value <= 0:
+                raise ValueError(
+                    "Ingest limits and chunk window must be positive integers"
+                )
+        timeout = self.ingest_command_timeout_seconds
+        if isinstance(timeout, bool) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Ingest timeout must be positive and finite")
+        if (
+            type(self.chunk_overlap_lines) is not int
+            or not 0 <= self.chunk_overlap_lines < self.chunk_window_lines
+        ):
+            raise ValueError("Chunk overlap must be in [0, window)")
 
     def validate_models(self) -> None:
         if self.models_mode not in {"fake", "real"}:
@@ -49,6 +74,16 @@ class Settings:
             chat_model=os.environ.get("TKA_CHAT_MODEL", cls.chat_model),
             embedding_model=os.environ.get("TKA_EMBEDDING_MODEL", cls.embedding_model),
             allow_local_sources=os.environ.get("TKA_ALLOW_LOCAL_SOURCES") == "1",
+            ingest_max_files=int(os.environ.get("TKA_INGEST_MAX_FILES", "5000")),
+            ingest_max_total_bytes=int(
+                os.environ.get("TKA_INGEST_MAX_TOTAL_BYTES", "200000000")
+            ),
+            ingest_command_timeout_seconds=float(
+                os.environ.get("TKA_INGEST_COMMAND_TIMEOUT_SECONDS", "120")
+            ),
+            chunk_window_lines=int(os.environ.get("TKA_CHUNK_WINDOW_LINES", "80")),
+            chunk_overlap_lines=int(os.environ.get("TKA_CHUNK_OVERLAP_LINES", "10")),
         )
         settings.validate_models()
+        settings.validate_ingest()
         return replace(settings, data_dir=settings.data_dir.expanduser().resolve())

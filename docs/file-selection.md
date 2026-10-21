@@ -1,16 +1,18 @@
 # Repository acquisition and file selection
 
 `app.ingest.clone_and_select(source, *, settings, limits)` is a synchronous
-library primitive. It returns committed repository text for future ingestion;
-registration, jobs, database persistence, chunking and indexing are not built by
-this API.
+library primitive. It returns committed repository text to the
+[background worker](background-ingest.md); this API itself performs no database,
+chunking or model work.
 
 Pass `SourceSpec(source_id: UUID, location: str)`, `Settings`, and
 `CloneLimits(max_files, max_total_bytes, subprocess_timeout_seconds)`. All limits
 are required: positive integer counts/bytes and a positive finite timeout, with
 booleans rejected. The production defaults are the owner-approved MISSION Q3 decision
 (2026-10-21): at most 5,000 indexable files, 200 MB of selected text, 1 MB per file and
-a 120 s clone timeout, all configurable; callers pass them in as `CloneLimits`.
+a 120 s timeout per Git command. Callers pass file-count, aggregate-byte and
+command-time limits as `CloneLimits`; the per-file exclusion is currently fixed
+at 1,000,000 bytes in selection.
 
 The frozen `SelectionResult` contains the source UUID, canonical `repo_url`, one
 resolved `commit_sha`, and a tuple of `SelectedFile` values sorted by exact path.
@@ -83,8 +85,8 @@ sources, and blob IDs preserve either supported Git hash format as text.
 Source IDs are caller-owned, matching `SourceSpec`; this primitive does not
 require a registry row or add a foreign key. The source registry is available
 separately through `/api/sources`. Acquisition returns metadata without writing
-rows. Worker persistence remains a later increment; this schema supplies its
-file-record seam. Migration 3 follows main's source-registry migration 2.
+rows. The background worker persists these records with their chunks as one
+snapshot. Migration 3 follows the source-registry migration 2.
 
 ## Exact matching rules
 
@@ -134,7 +136,7 @@ tree metadata; a missing/corrupt blob fails the operation.
 Only eligible text consumes file and byte limits. Equality succeeds; exceeding
 either limit fails the whole call. These limits do **not** cap downloaded packs,
 object storage, total tree entries, total operation duration or disk usage. Those
-deployment policies must be settled before worker deployment.
+deployment policies remain the operator's responsibility.
 
 ## Cache and errors
 

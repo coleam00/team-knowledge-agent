@@ -2,10 +2,10 @@
 
 `GET /api/sources/{id}/file?path=docs/deploy.md&start=14&end=18`
 returns eligible text from the source's persisted `indexed_commit`. It never
-fetches upstream, reads working files, or resolves HEAD. Registration still
-leaves sources queued: until the worker exists, tests and runtime checks use
-`clone_and_select` and update the source record directly. No `files` rows are
-required by this reader.
+fetches upstream, reads working files, or resolves HEAD. The background worker
+publishes the indexed commit after preparing the complete snapshot. No `files`
+rows are required by this reader; it validates eligible content in the pinned
+Git cache.
 
 HTTP and future adapters share the synchronous service:
 

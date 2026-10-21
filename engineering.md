@@ -14,5 +14,12 @@ factory and caused merge send-backs. So:
   `install(application, get_settings)` for its routes or mounts and, if it runs
   background work (such as an ingest worker), `lifespan(get_settings)`. See that
   package's docstring. Do not edit `app/main.py` to register a feature.
+- **What counts as overlapping work (for claims and picking):** two runs overlap only
+  if both must edit the same *existing* file. Adding new files never overlaps: a new
+  `app/features/f<NN>_*.py`, a new `scripts/smoke/features/f<NN>_*.py`, a new module
+  under `app/` or a new `tests/test_<feature>.py` can proceed beside any live claim.
+  So a claim's `Area` names the specific existing files the run will edit (for example
+  `app/sources.py, tests/test_sources.py`), never a whole directory such as `tests/` or
+  `app/`.
 - **Documentation:** describe a feature in its own `docs/<feature>.md`. `README.md` only
   gets a one-line link to it, not a new section.

@@ -5,8 +5,9 @@ Ask questions about your team's code and docs and get answers with citations. Bu
 ## Run it
 
 The app provides the application page, database migrations, health, build
-identity, and a persistent source registry. Indexing, search, answers, and MCP
-are not built yet; accepted sources remain queued for a later worker.
+identity, and a persistent source registry. The storage library persists chunks
+and retrieves full-text matches. Background indexing, HTTP search, answers, and
+MCP are not built yet; accepted sources remain queued for a later worker.
 The model library provides deterministic fake embeddings and a quoting answerer.
 The app's HTTP routes do not call models yet. The [acquisition library](docs/file-selection.md)
 clones and selects commit-pinned text; registration does not yet invoke it.
@@ -121,6 +122,33 @@ repository path in `url`. The stored URL is the resolved local path, while
 owner/name come from its local `origin` configuration. Relative paths, non-Git
 directories and network paths are rejected. Registration only reads Git metadata;
 it never runs repository code, hooks, filters, or credential helpers.
+
+## Chunk storage and lexical retrieval
+
+`app.index_store.replace_file(connection, source_id=..., path=..., blob_sha=...,
+language=..., chunks=...)` stores a sequence of validated `ChunkInput` records.
+Each record carries its exact content, 1-based inclusive line range, embedding,
+and embedding model ID. The function atomically updates file metadata and replaces
+that file's chunks, retaining the file ID. An empty sequence clears its chunks.
+Concurrent replacements of the same source/path serialize; failures restore the
+previous metadata and chunks. A caller's existing transaction can roll back the
+whole operation. Other files are unaffected.
+
+`full_text_search(connection, query, source_id=None)` returns at most 50 typed
+matches with chunk/file/source IDs, path, lines, content, embedding/model and rank.
+It uses PostgreSQL's English `websearch_to_tsquery` and `ts_rank_cd`, sorting by
+descending rank then ascending chunk UUID. Quotes, OR and exclusions use PostgreSQL
+web-search syntax. The optional source UUID restricts matches before ranking and
+limiting. Empty, stopword-only and unrelated queries return no matches.
+
+The forward migration adds generated English `tsv` with a GIN index and an
+untyped pgvector column; different models may store different vector dimensions.
+Embeddings use pgvector's float32 precision and retain their model identity.
+Model IDs are opaque and stored unchanged. SQL and Python reject empty IDs and
+IDs containing only ASCII spaces (U+0020); other characters, including tabs and
+Unicode whitespace, remain significant, preserving the existing SQL domain.
+Lexical retrieval does not compare embeddings. Vector/hybrid ranking and ingestion
+integration remain future increments; there is no ANN index or model call here.
 
 ## Checks
 

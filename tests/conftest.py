@@ -60,11 +60,14 @@ def client_factory() -> Callable[[FastAPI], TestClient]:
 
 @pytest.fixture
 def database_url() -> Iterator[str]:
-    url = os.environ.get("DATABASE_URL")
+    # TKA_TEST_DATABASE_URL lets a host supply the test database without setting
+    # DATABASE_URL, which some tools that launch the tests read for themselves.
+    url = os.environ.get("DATABASE_URL") or os.environ.get("TKA_TEST_DATABASE_URL")
     if not url:
         pytest.fail(
-            "Set DATABASE_URL to a supplied dedicated Postgres 17 database "
-            "with pgvector available; integration tests never provision a server."
+            "Set DATABASE_URL (or TKA_TEST_DATABASE_URL) to a supplied dedicated "
+            "Postgres 17 database with pgvector available; integration tests never "
+            "provision a server."
         )
     schema = f"tka_test_{uuid4().hex}"
     with connect(url) as connection:

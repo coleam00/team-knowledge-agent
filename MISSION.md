@@ -119,7 +119,6 @@ The journeys in `harness/END-TO-END.md` are the full version. This runs on every
 
 These are undecided, not forbidden. **The factory may propose an answer to any of them**, build against it, and record what it assumed -- the merge is then held for a human, so nothing ships on a guess and nothing stops for one.
 
-- **Q1** What chunk size and overlap give the best answers for code versus prose?
 - **Q2** Which OpenRouter chat and embedding models are the defaults for real mode?
 - **Q3** What are the per-repo limits (file count, total size, clone timeout) before ingest refuses?
 - **Q4** Should re-index also run on a schedule, and how often?
@@ -133,6 +132,7 @@ These are undecided, not forbidden. **The factory may propose an answer to any o
 
 ## Decisions
 
+- 2026-10-21 **Q1: What chunk size and overlap give the best answers for code versus prose?** Approved defaults: an 80-line window with 10 lines of overlap for text and Markdown (Markdown still splits on headings first), configurable; revisit with real answer-quality evidence later.
 - 2026-10-20 **Must every change pass the complete journeys, or is delivery staged?** Staged: Gate 3 covers what is built, unbuilt steps pass as "not yet built", nothing may regress, and from increment 18 the full journeys are required (see Gate 3).
 - 2026-10-20 **Which stack?** Python 3.12 + FastAPI with uv; Postgres 17 + pgvector; Vite + React + TypeScript served by the backend on the same port.
 - 2026-10-20 **Which model provider?** OpenRouter, one chat and one embedding model, both configurable, with `TKA_MODELS=fake` for tests and runtime checks.

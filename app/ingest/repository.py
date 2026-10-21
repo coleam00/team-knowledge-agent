@@ -259,7 +259,7 @@ def _acquire(
                 "kind": "local" if local else "github",
                 "repo_url": url,
             }
-            _safe_tree(root, destination)
+            _safe_path(root, destination)
             if destination.exists():
                 _validate_cache(root, destination, marker)
                 storage = destination

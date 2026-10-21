@@ -1,6 +1,6 @@
 {
   "workflow": "archon-loop",
-  "parallel": 3,
+  "parallel": 2,
   "inputs": {
     "runtime": "C:/Users/colem/OpenSource/tka/private/scenario.json describes how to run the Team Knowledge Agent from a checkout: its environment block gives the start and teardown commands and how to find the port this checkout's app serves on (start prints PORT=<n>), and its assertions say what must hold.",
     "holdout": "C:/Users/colem/OpenSource/tka/holdout/holdout.md",

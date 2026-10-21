@@ -8,6 +8,18 @@ beforeEach(() => {
 })
 
 describe('application shell', () => {
+  it.each([
+    ['ask', 'Ask', 'Asking questions will be available in a later release.'],
+    ['sources', 'Sources', 'Adding repositories will be available in a later release.'],
+  ])('identifies the app and explains availability on %s', (route, heading, notice) => {
+    window.history.replaceState(null, '', `/#/${route}`)
+    render(<App />)
+    expect(screen.getByText(/^Team Knowledge\s*Agent$/)).toBeVisible()
+    const main = within(screen.getByRole('main'))
+    expect(main.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+    expect(main.getByText(notice)).toBeVisible()
+  })
+
   it('navigates exactly Ask and Sources by pointer without a backend', async () => {
     const request = vi.spyOn(globalThis, 'fetch')
     const user = userEvent.setup()

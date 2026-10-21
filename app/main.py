@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -12,8 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from app import db
 from app.build_id import resolve_build_id
 from app.config import ModelConfigurationError, Settings
-from app.search import search_router
-from app.sources import source_router
+from app.features import feature_modules
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 logger = logging.getLogger(__name__)
@@ -44,11 +43,18 @@ def create_app() -> FastAPI:
         else:
             ready = True
 
+    features = feature_modules()
+
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         task = asyncio.create_task(initialize())
         try:
-            yield
+            async with AsyncExitStack() as stack:
+                for feature in features:
+                    background = getattr(feature, "lifespan", None)
+                    if background is not None:
+                        await stack.enter_async_context(background(storage_settings))
+                yield
         finally:
             await task
 
@@ -73,8 +79,10 @@ def create_app() -> FastAPI:
             raise HTTPException(503, "Storage is unavailable")
         return settings
 
-    application.include_router(source_router(storage_settings))
-    application.include_router(search_router(storage_settings))
+    for feature in features:
+        install = getattr(feature, "install", None)
+        if install is not None:
+            install(application, storage_settings)
 
     @application.get("/api/health")
     def health() -> JSONResponse:

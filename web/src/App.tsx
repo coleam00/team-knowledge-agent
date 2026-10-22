@@ -31,11 +31,12 @@ function plural(count: number, word: string, many = `${word}s`) {
 function suggestionsFor(sources: readonly SourceSummary[]) {
   const ready = sources.filter(source => source.status === 'ready')
   if (ready.length === 0) return []
-  const name = ready[0]!.name
+  const first = ready[0]!.name
+  const second = ready[1]?.name ?? first
   return [
-    `How do I get started with ${name}?`,
-    `How is ${name} organised?`,
-    `What has to pass before a change in ${name} can merge?`,
+    `How do I get started with ${first}?`,
+    `How is ${second} organised?`,
+    `What has to pass before a change in ${first} can merge?`,
   ]
 }
 

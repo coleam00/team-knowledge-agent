@@ -70,7 +70,7 @@ export function Ask({ ask = postAsk, suggestions = [], initialQuestion }: {
         <label htmlFor={`${id}-question`}>Your question</label>
         <p className={styles.hint} id={`${id}-hint`}>Press Enter to ask, or Shift+Enter for a new line.</p>
         <textarea id={`${id}-question`} name="question" rows={3} value={text} readOnly={pending}
-          placeholder="When are deploys frozen?" aria-describedby={`${id}-hint`}
+          placeholder="Ask anything about your team’s code and docs…" aria-describedby={`${id}-hint`}
           onChange={event => { setText(event.target.value) }} onKeyDown={onKeyDown} />
         <div className={styles.formFooter}>
           <button type="submit" className={styles.submit} disabled={pending || text.trim() === ''}>{pending ? 'Asking…' : 'Ask'}</button>

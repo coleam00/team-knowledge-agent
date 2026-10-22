@@ -46,11 +46,30 @@ with `uv sync --frozen` and launch Claude Code from the checkout root so `app` i
 importable. The exact CLI is `python -m app mcp`; it accepts no port and opens no
 HTTP listener. Configuration comes from the same environment variables as the web
 app, including `DATABASE_URL` and `TKA_DATA_DIR`. Real model mode requires its
-environment-only OpenRouter credential, even though no production tools are
-registered yet. Fake mode requires no credential or network model.
+environment-only OpenRouter credential. Fake mode requires no credential or network
+model.
 
-Both transports currently initialize and list **zero production tools**. Search,
-answering, file reads, and source listing through MCP are later increments.
+## Tools
+
+Both transports list exactly these four tools (`app/mcp_tools.py`). Each calls the
+same service function as its HTTP route, so results are identical to the API: the same
+citation objects in the same order. `source` is the source id (UUID) that
+`/api/sources` and `list_sources` return.
+
+| Tool | Parameters | Same as |
+|------|------------|---------|
+| `search` | `query` (required), `source?`, `limit?` (default 10) | `GET /api/search` |
+| `ask` | `question` (required), `source?` | `POST /api/ask` (`source_ids`) |
+| `fetch_source` | `source`, `path` (required), `start_line?`, `end_line?` (1-based, inclusive) | `GET /api/sources/{id}/file` |
+| `list_sources` | none | `GET /api/sources` |
+
+`ask` returns `known`, `answer` and `citations`; a question the sources cannot answer
+returns `known: false` and no citations without calling the model. `fetch_source`
+reads the file at the indexed commit, so a cited range returns exactly the cited
+lines. Invalid parameters, path traversal, absent files and unknown sources return an
+MCP tool error (`isError`); the server keeps running. Tools report "Storage is
+unavailable" until startup migrations finish. The tools read only; none writes to a
+repository or runs repository code.
 
 Each invocation owns one configuration/database runtime. Startup creates the
 state directory and runs the existing migrations asynchronously. Protocol
@@ -69,5 +88,5 @@ for initialization and its database connections to finish.
 It is called once per server, should only register services, and must not read
 readiness eagerly or create unmanaged resources. Tools may call the getter later;
 it raises HTTP 503 (`Storage is unavailable`) until storage is ready. Registration
-errors abort construction. The default registrar is empty; test tools and helpers
+errors abort construction. The default registrar registers the four tools above; test tools and helpers
 are never imported by application code.

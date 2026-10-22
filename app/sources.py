@@ -129,6 +129,14 @@ def source_connection(
         raise HTTPException(503, "Source storage is unavailable") from None
 
 
+def list_sources(settings: Settings) -> list[Source]:
+    """Every registered source; shared by the HTTP route and the MCP tool."""
+    with source_connection(settings.database_url) as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute("SELECT * FROM sources ORDER BY created_at, id")
+            return [Source.model_validate(row) for row in cursor.fetchall()]
+
+
 def source_router(get_settings: Callable[[], Settings]) -> APIRouter:
     router = APIRouter(prefix="/api/sources")
 
@@ -163,13 +171,10 @@ def source_router(get_settings: Callable[[], Settings]) -> APIRouter:
                 )
 
     @router.get("")
-    def list_sources(
+    def get_sources(
         settings: Annotated[Settings, Depends(get_settings)],
     ) -> list[Source]:
-        with source_connection(settings.database_url) as connection:
-            with connection.cursor(row_factory=dict_row) as cursor:
-                cursor.execute("SELECT * FROM sources ORDER BY created_at, id")
-                return [Source.model_validate(row) for row in cursor.fetchall()]
+        return list_sources(settings)
 
     @router.get("/{source_id}")
     def get_source(

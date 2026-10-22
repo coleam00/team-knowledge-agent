@@ -9,7 +9,7 @@ identity, a persistent source registry, and [hybrid search](docs/search.md) with
 commit-pinned citations over stored chunks. Accepted sources are indexed in the
 background and become ready or failed with an error. [Grounded answers](docs/ask.md) are available through `/api/ask` and the Ask page, which shows
 cited answers or an explicit knowledge gap.
-[MCP transports](docs/mcp.md) support HTTP and stdio with no production tools yet.
+[MCP transports](docs/mcp.md) support HTTP and stdio and expose the `search`, `ask`, `fetch_source` and `list_sources` tools.
 The model library provides deterministic fake embeddings and a quoting answerer.
 Search embeds each query with the active model. The [acquisition library](docs/file-selection.md)
 clones and selects commit-pinned text for the background worker.

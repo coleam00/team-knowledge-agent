@@ -12,7 +12,7 @@ from app import db, main
 from scripts.smoke.core import ledger
 from tests.conftest import local_event_loop
 from tests.mcp_support import child_session
-from tests.test_mcp import http_session
+from tests.test_mcp import PRODUCTION_TOOLS, http_session
 
 
 @pytest.mark.database
@@ -44,7 +44,9 @@ def test_transports_share_migrations_and_close_connections(
         with anyio.fail_after(20):
             async with http_session(main.create_app()) as session:
                 await session.initialize()
-                assert (await session.list_tools()).tools == []
+                assert PRODUCTION_TOOLS == sorted(
+                    tool.name for tool in (await session.list_tools()).tools
+                )
                 while migrated == 0:
                     await anyio.sleep(0.01)
                 assert migrated == 1

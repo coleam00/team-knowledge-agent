@@ -6,46 +6,48 @@ import { citedAnswer, deployCitation, literalText, longCitation } from './citati
 
 afterEach(() => { vi.restoreAllMocks() })
 
-describe('answer citations', () => {
-  it('activates the exact matching card with Enter and Space, then tabs to its link', async () => {
-    const user = userEvent.setup()
-    const scroll = vi.fn()
-    HTMLElement.prototype.scrollIntoView = scroll
-    // Reverse order to prove markers match n, not the citation array index.
-    render(<Answer response={{ ...citedAnswer, citations: [longCitation, deployCitation] }} />)
-    const first = screen.getByRole('article', { name: deployCitation.path })
-    const second = screen.getByRole('article', { name: longCitation.path })
-    const chip1 = screen.getByRole('button', { name: 'Show citation 1' })
-    const chip2 = screen.getByRole('button', { name: 'Show citation 2' })
-    await user.tab()
-    expect(chip1).toHaveFocus()
-    await user.keyboard('{Enter}')
-    expect(first).toHaveFocus()
-    expect(chip1).toHaveAttribute('aria-controls', first.id)
-    expect(first).toHaveAttribute('data-highlighted', 'true')
-    expect(second).toHaveAttribute('data-highlighted', 'false')
-    expect(scroll.mock.instances[0]).toBe(first)
-    expect(scroll).toHaveBeenLastCalledWith({ block: 'nearest', behavior: 'instant' })
-    await user.tab()
-    expect(within(first).getByRole('link')).toHaveFocus()
-    chip2.focus()
-    await user.keyboard(' ')
-    expect(second).toHaveFocus()
-    expect(second).toHaveAttribute('data-highlighted', 'true')
-    expect(first).toHaveAttribute('data-highlighted', 'false')
-    expect(scroll.mock.instances[1]).toBe(second)
+describe('answer', () => {
+  it('shows the grounded header, source count and one chip per known marker', () => {
+    render(<Answer response={citedAnswer} idPrefix="t" />)
+    expect(screen.getByText('Grounded answer')).toBeVisible()
+    expect(screen.getByRole('button', { name: '2 sources' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Show citation 1' })).toHaveTextContent('[1]')
+    expect(screen.getByRole('button', { name: 'Show citation 2' })).toHaveAttribute('aria-controls', 't-citation-2')
+    // An unmatched marker stays plain text.
+    expect(screen.getByText(/stays plain text: \[99\]/)).toBeVisible()
+    expect(screen.getByRole('list', { name: 'Cited sources' }).querySelectorAll('li')).toHaveLength(2)
   })
 
-  it('keeps separate answers isolated, even when they cite the same number', async () => {
+  it('reports the exact citation for chips and pills, by number rather than array position', async () => {
     const user = userEvent.setup()
-    HTMLElement.prototype.scrollIntoView = vi.fn()
-    render(<><Answer response={citedAnswer} /><Answer response={citedAnswer} /></>)
-    await user.click(screen.getAllByRole('button', { name: 'Show citation 1' })[1]!)
-    const cards = screen.getAllByRole('article', { name: deployCitation.path })
-    expect(cards[1]).toHaveFocus()
-    expect(cards[0]).toHaveAttribute('data-highlighted', 'false')
-    expect(cards[1]).toHaveAttribute('data-highlighted', 'true')
-    expect(cards[0]!.id).not.toBe(cards[1]!.id)
+    const onCite = vi.fn()
+    const onOpenSources = vi.fn()
+    // Reverse order to prove markers match n, not the citation array index.
+    render(<Answer response={{ ...citedAnswer, citations: [longCitation, deployCitation] }} onCite={onCite} onOpenSources={onOpenSources} selectedN={2} />)
+    await user.tab()
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'Show citation 1' })).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(onCite).toHaveBeenLastCalledWith(deployCitation)
+    screen.getByRole('button', { name: 'Show citation 2' }).focus()
+    await user.keyboard(' ')
+    expect(onCite).toHaveBeenLastCalledWith(longCitation)
+    expect(screen.getByRole('button', { name: 'Show citation 2' })).toHaveAttribute('data-active', 'true')
+    expect(screen.getByRole('button', { name: 'Show citation 1' })).toHaveAttribute('data-active', 'false')
+    await user.click(screen.getByRole('button', { name: /deploy\.md/ }))
+    expect(onCite).toHaveBeenLastCalledWith(deployCitation)
+    await user.click(screen.getByRole('button', { name: '2 sources' }))
+    expect(onOpenSources).toHaveBeenCalledOnce()
+  })
+
+  it('copies the answer text', async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    render(<Answer response={citedAnswer} />)
+    await user.click(screen.getByRole('button', { name: 'Copy answer' }))
+    expect(writeText).toHaveBeenCalledWith(citedAnswer.answer)
+    expect(await screen.findByRole('button', { name: 'Answer copied' })).toBeVisible()
   })
 
   it('uses the supplied URL verbatim and exposes the repo, path, range and new-tab behavior', () => {
@@ -104,11 +106,22 @@ describe('answer citations', () => {
       citations: [{ ...deployCitation, snippet: literalText, repo: literalText, path: literalText }],
     }} />)
     expect(container.querySelector('script, img, [onerror]')).toBeNull()
-    expect(container.textContent).toContain(literalText)
+    expect(container.textContent).toContain('<script>window.citationExecuted = true</script>')
     expect(container.textContent).toContain('[2] [99] [01]')
-    expect(screen.getAllByRole('button')).toHaveLength(1)
-    expect(screen.getAllByRole('link')).toHaveLength(1)
-    expect(within(screen.getByRole('list', { name: 'Source lines' })).getAllByRole('listitem')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: /Show citation/ })).toHaveLength(1)
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('renders formatted text: paragraphs, lists, inline code and bold', () => {
+    const { container } = render(<Answer response={{
+      known: true,
+      answer: 'Start with **the harness**.\n1. Run `npm ci`\n2. Run `npm test` [1]\n- first\n- second',
+      citations: [deployCitation],
+    }} />)
+    expect(container.querySelector('strong')).toHaveTextContent('the harness')
+    expect(container.querySelectorAll('ol li')).toHaveLength(2)
+    expect(container.querySelectorAll('ul:not([aria-label]) li')).toHaveLength(2)
+    expect(container.querySelectorAll('code')).toHaveLength(2)
   })
 
   it.each(['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', 'https://github.com.evil.test/blob/C', 'https://user:pass@github.com/a/b', '/relative'])('does not make an unsafe API URL executable: %s', url => {

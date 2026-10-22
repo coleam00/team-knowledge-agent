@@ -22,7 +22,7 @@ export function Preview() {
             if (state === 'pending') await new Promise<void>(() => {})
             if (state === 'error') throw new Error('This repository is already a source.')
           }}
-          onReindex={id => { setCalls(previous => [...previous, `reindex: ${id}`]) }} />
+          onAsk={source => { setCalls(previous => [...previous, `ask: ${source.id}`]) }} />
         <p aria-label="Callback log">{calls.join('; ')}</p>
       </div>
     </main>

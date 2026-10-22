@@ -31,7 +31,7 @@ export function ErrorState({ message, onRetry, retryLabel = 'Try again' }: {
 export function EmptySources({ addForm }: { addForm: ReactNode }) {
   const titleId = useId()
   return (
-    <section className={styles.card} aria-labelledby={titleId}>
+    <section className={`${styles.card} ${styles.empty}`} aria-labelledby={titleId}>
       <h2 id={titleId}>No sources yet</h2>
       <p className={styles.muted}>Add a repository to make its code and docs available to your team.</p>
       <div className={styles.addForm}>{addForm}</div>

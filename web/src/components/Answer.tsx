@@ -1,4 +1,5 @@
-import { useId, useRef, useState, type ReactNode, type Ref } from 'react'
+import { useEffect, useRef, useState, useId, type ReactNode, type Ref } from 'react'
+import { CheckIcon, CopyIcon, ExternalIcon } from './Icons'
 import { UnknownAnswer } from './States'
 import styles from './Answer.module.css'
 import type { Citation } from '../citation'
@@ -59,7 +60,7 @@ function inline(text: string, chip: (marker: string, key: string) => ReactNode |
     const key = `${prefix}-${index}`
     if (/^\[\d+\]$/.test(part)) return chip(part, key) ?? part
     if (part.length > 2 && part.startsWith('`') && part.endsWith('`')) return <code key={key} className={styles.inlineCode}>{part.slice(1, -1)}</code>
-    if (part.length > 4 && part.startsWith('**') && part.endsWith('**')) return <strong key={key}>{part.slice(2, -2)}</strong>
+    if (part.length > 4 && part.startsWith('**') && part.endsWith('**')) return <strong key={key}>{inline(part.slice(2, -2), chip, key)}</strong>
     return part
   })
 }
@@ -81,73 +82,101 @@ export function CitationCard({ citation, id, highlighted = false, ref }: {
       className={styles.card} data-highlighted={highlighted}>
       <div className={styles.heading}>
         <span className={styles.number}>[{citation.n}]</span>
-        <span className={styles.repo}>{citation.repo}</span>
+        <span className={styles.repo} title={citation.repo}>{citation.repo}</span>
       </div>
       <h3 id={titleId} className={styles.path} title={citation.path} aria-label={citation.path}>
         <span aria-hidden="true">{displayPath(citation.path)}</span>
       </h3>
-      <p className={styles.range}>L{citation.start_line}-L{citation.end_line}</p>
+      <div className={styles.meta}>
+        <p className={styles.range}>L{citation.start_line}-L{citation.end_line}</p>
+        <span className={styles.commit} title={citation.commit}>@ {citation.commit.slice(0, 7)}</span>
+      </div>
       <ol className={styles.snippet} aria-label="Source lines" start={citation.start_line}>
-        {lines.map((line, index) => <li key={index}>
-          <span className={styles.lineNumber} aria-hidden="true">{citation.start_line + index}</span>
-          <code>{line}</code>
-        </li>)}
+        {lines.map((line, index) => {
+          // Wrapped rows hang under their own indentation instead of snapping back to column zero.
+          const indent = Math.min(/^ */.exec(line)![0].length, 32)
+          return <li key={index}>
+            <span className={styles.lineNumber} aria-hidden="true">{citation.start_line + index}</span>
+            <code style={indent > 0 ? { paddingLeft: `${indent}ch`, textIndent: `-${indent}ch` } : undefined}>{line}</code>
+          </li>
+        })}
       </ol>
-      {href ? <a href={href} target="_blank" rel="noopener noreferrer">Open on GitHub<span className={styles.srOnly}> (opens in a new tab)</span></a>
-        : <p className={styles.repo}>GitHub link unavailable.</p>}
+      <div className={styles.cardFooter}>
+        {href ? <a href={href} target="_blank" rel="noopener noreferrer">Open on GitHub<ExternalIcon size={14} /><span className={styles.srOnly}> (opens in a new tab)</span></a>
+          : <p className={styles.repo}>GitHub link unavailable.</p>}
+      </div>
     </article>
   )
 }
 
-export function Answer({ response }: { response: AnswerResponse }) {
-  const id = useId()
-  const cards = useRef(new Map<number, HTMLElement>())
-  const [selected, setSelected] = useState<Citation | null>(null)
+function filename(path: string) {
+  return path.slice(path.lastIndexOf('/') + 1) || path
+}
+
+export function Answer({ response, idPrefix, selectedN = null, onCite, onOpenSources }: {
+  response: AnswerResponse
+  /** Same prefix the citation panel uses for card ids, so chips can reference them. */
+  idPrefix?: string
+  selectedN?: number | null
+  onCite?: (citation: Citation) => void
+  onOpenSources?: () => void
+}) {
+  const fallbackId = useId()
+  const prefix = idPrefix ?? fallbackId
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => { window.clearTimeout(timer.current) }, [])
   const citationsByMarker = new Map(response.citations.map(citation => [`[${citation.n}]`, citation]))
 
-  function activate(citation: Citation) {
-    setSelected(citation)
-    const card = cards.current.get(citation.n)
-    card?.focus({ preventScroll: true })
-    card?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
+  if (!response.known) return <UnknownAnswer />
+
+  const count = response.citations.length
+
+  function copy() {
+    void navigator.clipboard?.writeText(response.answer).then(() => {
+      setCopied(true)
+      window.clearTimeout(timer.current)
+      timer.current = window.setTimeout(() => { setCopied(false) }, 1800)
+    }, () => undefined)
   }
 
-  if (!response.known) return <UnknownAnswer />
+  const chip = (marker: string, key: string) => {
+    const citation = citationsByMarker.get(marker)
+    return citation
+      ? <button key={key} type="button" className={styles.chip} aria-label={`Show citation ${citation.n}`}
+        aria-controls={`${prefix}-citation-${citation.n}`} data-active={selectedN === citation.n}
+        onClick={() => { onCite?.(citation) }}>{marker}</button>
+      : null
+  }
 
   return (
     <div className={styles.answer}>
       <div className={styles.verdict}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M5 12l4 4L19 6" /></svg>
-        <span>Grounded answer</span>
-        <span className={styles.verdictMeta}>{response.citations.length} source{response.citations.length === 1 ? '' : 's'} cited
-          · {new Set(response.citations.map(citation => citation.path)).size} file{new Set(response.citations.map(citation => citation.path)).size === 1 ? '' : 's'}</span>
+        <span className={styles.verdictIcon}><CheckIcon size={12} /></span>
+        <span className={styles.verdictLabel}>Grounded answer</span>
+        <span className={styles.dot} aria-hidden="true">·</span>
+        <button type="button" className={styles.sourcesButton} onClick={onOpenSources}>
+          {count} source{count === 1 ? '' : 's'}
+        </button>
       </div>
-      <div className={styles.prose}>{(() => {
-        const chip = (marker: string, key: string) => {
-          const citation = citationsByMarker.get(marker)
-          return citation
-            ? <button key={key} type="button" className={styles.chip} aria-label={`Show citation ${citation.n}`}
-              aria-controls={`${id}-citation-${citation.n}`} onClick={() => { activate(citation) }}>{marker}</button>
-            : null
-        }
-        return blocks(response.answer).map((block, index) => block.kind === 'p'
-          ? <p key={index}>{inline(block.lines.join(' '), chip, `p${index}`)}</p>
-          : block.kind === 'ol'
-            ? <ol key={index}>{block.items.map((item, i) => <li key={i}>{inline(item, chip, `o${index}-${i}`)}</li>)}</ol>
-            : <ul key={index}>{block.items.map((item, i) => <li key={i}>{inline(item, chip, `u${index}-${i}`)}</li>)}</ul>)
-      })()}</div>
-      {response.citations.length > 0 && <section aria-labelledby={`${id}-sources`}>
-        <h2 id={`${id}-sources`} className={styles.sourcesTitle}>Sources</h2>
-        <ol className={styles.cards}>
+      <div className={styles.prose}>{blocks(response.answer).map((block, index) => block.kind === 'p'
+        ? <p key={index}>{inline(block.lines.join(' '), chip, `p${index}`)}</p>
+        : block.kind === 'ol'
+          ? <ol key={index}>{block.items.map((item, i) => <li key={i}>{inline(item, chip, `o${index}-${i}`)}</li>)}</ol>
+          : <ul key={index}>{block.items.map((item, i) => <li key={i}>{inline(item, chip, `u${index}-${i}`)}</li>)}</ul>)}</div>
+      <div className={styles.footer}>
+        <ul className={styles.sourceList} aria-label="Cited sources">
           {response.citations.map(citation => <li key={citation.n}>
-            <CitationCard citation={citation} id={`${id}-citation-${citation.n}`} highlighted={selected === citation}
-              ref={element => {
-                if (element) cards.current.set(citation.n, element)
-                else cards.current.delete(citation.n)
-              }} />
+            <button type="button" className={styles.sourcePill} data-active={selectedN === citation.n} title={citation.path}
+              onClick={() => { onCite?.(citation) }}>
+              <span className={styles.pillNumber}>{citation.n}</span>{filename(citation.path)}
+            </button>
           </li>)}
-        </ol>
-      </section>}
+        </ul>
+        <button type="button" className={styles.copy} onClick={copy} aria-label={copied ? 'Answer copied' : 'Copy answer'}>
+          {copied ? <CheckIcon size={15} /> : <CopyIcon size={15} />}<span>{copied ? 'Copied' : 'Copy'}</span>
+        </button>
+      </div>
     </div>
   )
 }

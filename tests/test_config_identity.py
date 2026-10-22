@@ -9,6 +9,33 @@ from app import build_id
 from app.config import ModelConfigurationError, Settings
 
 
+def test_default_chunk_configuration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("TKA_CHUNK_WINDOW_LINES", raising=False)
+    monkeypatch.delenv("TKA_CHUNK_OVERLAP_LINES", raising=False)
+    direct = Settings(None, tmp_path, models_mode="fake")
+    direct.validate_ingest()
+    environment = Settings.from_env()
+    for settings in (direct, environment):
+        assert (settings.chunk_window_lines, settings.chunk_overlap_lines) == (80, 10)
+
+
+@pytest.mark.parametrize("overlap", [8, 10])
+def test_chunk_overlap_must_be_less_than_window(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, overlap: int
+) -> None:
+    monkeypatch.setenv("TKA_CHUNK_WINDOW_LINES", "8")
+    monkeypatch.setenv("TKA_CHUNK_OVERLAP_LINES", str(overlap))
+    with pytest.raises(ValueError, match=r"Chunk overlap must be in \[0, window\)"):
+        Settings.from_env()
+    settings = Settings(
+        None, tmp_path, chunk_window_lines=8, chunk_overlap_lines=overlap
+    )
+    with pytest.raises(ValueError, match=r"Chunk overlap must be in \[0, window\)"):
+        settings.validate_ingest()
+
+
 @pytest.mark.parametrize(("mode", "expected"), [("fake", 0.25), ("real", 0.35)])
 def test_similarity_defaults_and_override(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str, expected: float

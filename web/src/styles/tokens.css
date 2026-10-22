@@ -18,6 +18,27 @@
   --glow: color-mix(in srgb, var(--accent) 10%, transparent);
   --shadow: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent), 0 12px 32px -16px color-mix(in srgb, var(--background) 80%, transparent);
   --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 18px;
+  --clear: transparent;
+  --hover: color-mix(in srgb, var(--text) 6%, transparent);
+  --bubble: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  --bubble-line: color-mix(in srgb, var(--accent) 32%, var(--border));
+  --overlay: color-mix(in srgb, var(--background) 72%, transparent);
+  --warning-soft: color-mix(in srgb, var(--warning) 16%, transparent);
+  --shadow-lg: 0 24px 60px -24px color-mix(in srgb, var(--background) 90%, transparent), 0 0 0 1px color-mix(in srgb, var(--text) 5%, transparent);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --fast: 140ms;
+  --thread-width: 780px;
+  --panel-width: clamp(360px, 27vw, 420px);
   --font-body: 15px;
   --font-metadata: 13px;
   --font-heading: clamp(1.75rem, 5vw, 2.5rem);
@@ -77,6 +98,23 @@ select {
 
 button {
   cursor: pointer;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease), color var(--fast) var(--ease), box-shadow var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 :focus-visible {

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Sources } from '../src/components/Sources'
@@ -7,11 +7,11 @@ import { sources } from './sources-fixtures'
 afterEach(() => vi.unstubAllGlobals())
 
 describe.each(['dark', 'light'])('Sources at 360px in %s theme (layout also checked in browser)', theme => {
-  function setup(items = sources, onAdd = vi.fn(), onReindex = vi.fn()) {
+  function setup(items = sources, onAdd = vi.fn(), onAsk = vi.fn()) {
     vi.stubGlobal('innerWidth', 360)
     vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes(theme), media: query })))
-    render(<Sources sources={items} onAdd={onAdd} onReindex={onReindex} />)
-    return { user: userEvent.setup(), onAdd, onReindex }
+    render(<Sources sources={items} onAdd={onAdd} onAsk={onAsk} />)
+    return { user: userEvent.setup(), onAdd, onAsk }
   }
 
   it('renders every textual status, labelled metadata, and the actual failure', () => {
@@ -19,8 +19,9 @@ describe.each(['dark', 'light'])('Sources at 360px in %s theme (layout also chec
     for (const source of sources) {
       const card = screen.getByRole('article', { name: `${source.owner}/${source.name}` })
       expect(within(card).getByText(source.status)).toBeVisible()
-      expect(within(card).getByRole('button', { name: 'Re-index' }).hasAttribute('disabled'))
-        .toBe(source.status === 'queued' || source.status === 'indexing')
+      expect(within(card).getByRole('button', { name: 'Ask about this repo' }).hasAttribute('disabled'))
+        .toBe(source.status !== 'ready')
+      expect(within(card).queryByRole('button', { name: /re-index/i })).not.toBeInTheDocument()
     }
     const ready = screen.getByRole('article', { name: 'team/handbook' })
     const metadata = Object.fromEntries([...ready.querySelectorAll('dl > div')].map(item => [
@@ -76,28 +77,49 @@ describe.each(['dark', 'light'])('Sources at 360px in %s theme (layout also chec
     expect(onAdd).toHaveBeenCalledTimes(2)
   })
 
-  it('only re-indexes ready/failed and passes precisely the selected source id', async () => {
-    const { user, onReindex } = setup()
+  it('asks about exactly the selected ready repository', async () => {
+    const { user, onAsk } = setup()
     for (const source of sources) {
       const card = screen.getByRole('article', { name: `${source.owner}/${source.name}` })
-      const button = within(card).getByRole('button', { name: 'Re-index' })
-      await user.click(button)
+      await user.click(within(card).getByRole('button', { name: 'Ask about this repo' }))
     }
-    expect(onReindex.mock.calls).toEqual([['source-ready'], ['source-failed']])
+    expect(onAsk).toHaveBeenCalledExactlyOnceWith(sources[2])
   })
 
-  it('supports keyboard re-index, blocks pending repeats, and presents retryable failure', async () => {
-    let reject!: (error: Error) => void
-    const onReindex = vi.fn().mockImplementationOnce(() => new Promise<void>((_, fail) => { reject = fail }))
-    const { user } = setup([sources[2]!], vi.fn(), onReindex)
-    await user.tab()
-    expect(screen.getByRole('button', { name: 'Re-index' })).toHaveFocus()
-    await user.keyboard('{Enter}{Enter}')
-    expect(onReindex).toHaveBeenCalledExactlyOnceWith('source-ready')
-    expect(screen.getByRole('button', { name: 'Queuing re-index…' })).toBeDisabled()
-    await act(async () => reject(new Error('The server could not queue the job.')))
-    expect(screen.getByRole('alert')).toHaveTextContent('The server could not queue the job.')
-    await user.click(screen.getByRole('button', { name: 'Re-index' }))
-    expect(onReindex).toHaveBeenCalledTimes(2)
+  it('shows the library: stats, one card per repository and a quiet add tile', () => {
+    setup()
+    const stats = Object.fromEntries([...document.querySelectorAll('dl')[0]!.children].map(item => [
+      item.querySelector('dt')!.textContent, item.querySelector('dd')!.textContent,
+    ]))
+    expect(stats).toEqual({ Repositories: '4', Ready: '1', 'Files indexed': '5', Chunks: '9' })
+    expect(within(screen.getByRole('list', { name: 'Repositories' })).getAllByRole('article')).toHaveLength(4)
+    expect(screen.getByRole('heading', { level: 1, name: 'Sources' })).toBeVisible()
+  })
+
+  it('opens the add panel from the header, adds once and closes it', async () => {
+    const { user, onAdd } = setup()
+    expect(screen.queryByRole('form')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add repository' }))
+    const input = screen.getByRole('textbox', { name: 'Repository URL' })
+    expect(input).toBeVisible()
+    await user.type(input, 'https://github.com/team/new{Enter}')
+    expect(onAdd).toHaveBeenCalledExactlyOnceWith('https://github.com/team/new')
+    await waitFor(() => { expect(screen.queryByRole('form')).not.toBeInTheDocument() })
+  })
+
+  it('opens the add panel from the tile and cancels without adding', async () => {
+    const { user, onAdd } = setup()
+    await user.click(screen.getByRole('button', { name: /^Add a repository/ }))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('form')).not.toBeInTheDocument()
+    expect(onAdd).not.toHaveBeenCalled()
+  })
+
+  it('keeps the add panel open and shows the error when adding fails', async () => {
+    const { user } = setup(sources, vi.fn().mockRejectedValue(new Error('This repository is already in the library.')))
+    await user.click(screen.getByRole('button', { name: 'Add repository' }))
+    await user.type(screen.getByRole('textbox', { name: 'Repository URL' }), 'https://github.com/team/handbook{Enter}')
+    expect(await screen.findByRole('alert')).toHaveTextContent('already in the library')
+    expect(screen.getByRole('form')).toBeVisible()
   })
 })

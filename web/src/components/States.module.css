@@ -1,21 +1,20 @@
 .card {
   min-width: 0;
-  padding: 24px;
+  padding: 20px 22px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: var(--shadow);
 }
 
 .card h2 {
-  margin: 0 0 12px;
-  font-size: 20px;
+  margin: 0 0 8px;
+  font-size: 17px;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
 .card p {
-  margin: 0 0 20px;
+  margin: 0 0 16px;
 }
 
 .card p:last-child {
@@ -36,7 +35,13 @@
 }
 
 .error button {
-  margin-top: 20px;
+  margin-top: 16px;
+  border-radius: var(--radius-sm);
+}
+
+.empty {
+  max-width: 640px;
+  padding: 32px;
 }
 
 .skeleton {

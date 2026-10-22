@@ -1,5 +1,7 @@
-﻿import { useState, useSyncExternalStore } from 'react'
-import { Ask } from './components/Ask'
+import { useState, useSyncExternalStore } from 'react'
+import { Ask, type LibrarySummary, type Suggestion } from './components/Ask'
+import { LogoMark } from './components/Icons'
+import { PageHeader } from './components/PageHeader'
 import { Sources, type SourceSummary } from './components/Sources'
 import { ErrorState, LoadingState } from './components/States'
 import { isBusy, useSources } from './sourcesClient'
@@ -28,15 +30,16 @@ function plural(count: number, word: string, many = `${word}s`) {
   return `${count.toLocaleString('en-US')} ${count === 1 ? word : many}`
 }
 
-function suggestionsFor(sources: readonly SourceSummary[]) {
+function suggestionsFor(sources: readonly SourceSummary[]): Suggestion[] {
   const ready = sources.filter(source => source.status === 'ready')
   if (ready.length === 0) return []
   const first = ready[0]!.name
   const second = ready[1]?.name ?? first
   return [
-    `How do I get started with ${first}?`,
-    `How is ${second} organised?`,
-    `What has to pass before a change in ${first} can merge?`,
+    { label: 'Get started', question: `How do I get started with ${first}?` },
+    { label: 'Structure', question: `How is ${second} organised?` },
+    { label: 'Quality gates', question: `What has to pass before a change in ${first} can merge?` },
+    { label: 'Architecture', question: `What are the main moving parts of ${first}?` },
   ]
 }
 
@@ -57,23 +60,6 @@ function Library({ sources }: { sources: readonly SourceSummary[] | null }) {
   )
 }
 
-function ContextStrip({ sources }: { sources: readonly SourceSummary[] | null }) {
-  if (sources === null) return null
-  const t = totals(sources)
-  if (sources.length === 0) {
-    return <p className={styles.context}><a href="#/sources">Add a repository</a> to start asking questions.</p>
-  }
-  return (
-    <p className={styles.context}>
-      <span className={styles.contextDot} aria-hidden="true" />
-      Answering from {plural(t.ready, 'repository', 'repositories')}
-      <span className={styles.contextSep} aria-hidden="true">·</span>{plural(t.files, 'file')}
-      <span className={styles.contextSep} aria-hidden="true">·</span>{plural(t.chunks, 'chunk')} indexed
-      {t.busy > 0 && <><span className={styles.contextSep} aria-hidden="true">·</span>{t.busy} indexing now</>}
-    </p>
-  )
-}
-
 export default function App() {
   const route = useSyncExternalStore(subscribe, currentRoute, () => 'ask')
   const { sources, error, refresh, add } = useSources()
@@ -85,6 +71,8 @@ export default function App() {
   }
 
   const t = totals(sources ?? [])
+  const library: LibrarySummary | null = sources === null ? null
+    : { repositories: t.ready, files: t.files, chunks: t.chunks, busy: t.busy }
 
   return (
     <div className={styles.shell}>
@@ -94,11 +82,7 @@ export default function App() {
       }}>Skip to content</a>
       <aside className={styles.sidebar}>
         <div className={styles.brand}>
-          <span className={styles.logo} aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-              <path d="M4 4h6l2 2 2-2h6v15h-6l-2 2-2-2H4zM12 6v15" />
-            </svg>
-          </span>
+          <span className={styles.logo} aria-hidden="true"><LogoMark /></span>
           <span>Team Knowledge<br />Agent</span>
         </div>
         <nav aria-label="Main navigation" className={styles.navigation}>
@@ -119,32 +103,19 @@ export default function App() {
         <Library sources={sources} />
         <p className={styles.sidebarNote}>Every answer cites the exact lines it came from, pinned to the indexed commit.</p>
       </aside>
-      <main id="main" tabIndex={-1} className={styles.main}>
-        <div className={styles.answerColumn}>
-          <header className={styles.pageHeader}>
-            <p className={styles.eyebrow}>TEAM KNOWLEDGE</p>
-            <h1>{route === 'ask' ? 'Ask' : 'Sources'}</h1>
-            <p className={styles.description}>
-              {route === 'ask'
-                ? 'Find answers in your team’s code and docs, with sources you can check.'
-                : 'The repositories your team relies on. Each one is cloned, chunked and embedded at a pinned commit.'}
-            </p>
-          </header>
-          {route === 'ask' ? <>
-            <ContextStrip sources={sources} />
-            <Ask key={preset?.key} initialQuestion={preset?.question} suggestions={suggestionsFor(sources ?? [])} />
-          </> : sources === null && !error ? <LoadingState label="Loading sources…" />
-            : sources === null ? <ErrorState message={error!} onRetry={() => { void refresh() }} />
-              : <>
-                {sources.length > 0 && <dl className={styles.stats}>
-                  <div><dt>Repositories</dt><dd>{sources.length}</dd></div>
-                  <div><dt>Ready</dt><dd>{t.ready}</dd></div>
-                  <div><dt>Files indexed</dt><dd>{t.files.toLocaleString('en-US')}</dd></div>
-                  <div><dt>Chunks</dt><dd>{t.chunks.toLocaleString('en-US')}</dd></div>
-                </dl>}
-                <Sources sources={sources} onAdd={add} onAsk={askAbout} />
-              </>}
+      <main id="main" tabIndex={-1} className={route === 'ask' ? styles.chat : styles.main}>
+        <div hidden={route !== 'ask'}>
+          <Ask preset={preset ?? undefined} suggestions={suggestionsFor(sources ?? [])} library={library} />
         </div>
+        {route === 'sources' && <div className={styles.pageColumn}>
+          {sources === null && !error ? <>
+            <PageHeader title="Sources" description="The repositories your team relies on." />
+            <LoadingState label="Loading sources…" />
+          </> : sources === null ? <>
+            <PageHeader title="Sources" description="The repositories your team relies on." />
+            <ErrorState message={error!} onRetry={() => { void refresh() }} />
+          </> : <Sources sources={sources} onAdd={add} onAsk={askAbout} />}
+        </div>}
       </main>
     </div>
   )

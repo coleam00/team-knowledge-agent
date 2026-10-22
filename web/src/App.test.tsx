@@ -12,7 +12,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('application shell', () => {
   it.each([
-    ['ask', 'Ask', 'Press Enter to ask, or Shift+Enter for a new line.'],
+    ['ask', 'Ask', 'Enter to send · Shift+Enter for a new line'],
     ['sources', 'Sources', 'Add a repository to make its code and docs available to your team.'],
   ])('identifies the app and explains availability on %s', async (route, heading, notice) => {
     window.history.replaceState(null, '', `/#/${route}`)

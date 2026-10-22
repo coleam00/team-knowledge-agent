@@ -14,6 +14,7 @@ export interface SourceSummary {
   file_count: number
   chunk_count: number
   error: string | null
+  url?: string
 }
 
 type Action = (value: string) => void | Promise<void>
@@ -66,7 +67,11 @@ export function AddRepositoryForm({ onAdd }: { onAdd: Action }) {
   )
 }
 
-export function SourceCard({ source, onReindex }: { source: SourceSummary; onReindex: Action }) {
+export function SourceCard({ source, onReindex, onAsk }: {
+  source: SourceSummary
+  onReindex?: Action
+  onAsk?: (source: SourceSummary) => void
+}) {
   const titleId = useId()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -74,7 +79,7 @@ export function SourceCard({ source, onReindex }: { source: SourceSummary; onRei
   const busy = source.status === 'queued' || source.status === 'indexing'
 
   async function reindex() {
-    if (busy || submitting.current) return
+    if (!onReindex || busy || submitting.current) return
     submitting.current = true
     setPending(true)
     setError(null)
@@ -110,23 +115,30 @@ export function SourceCard({ source, onReindex }: { source: SourceSummary; onRei
       </dl>
       {source.status === 'failed' && <p className={styles.error}>Indexing failed: {source.error || 'No error details available. Try re-indexing.'}</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
-      <button type="button" disabled={busy || pending} onClick={reindex}>{pending ? 'Queuing re-index…' : 'Re-index'}</button>
+      <div className={styles.actions}>
+        {onAsk && <button type="button" className={styles.primary} disabled={source.status !== 'ready'}
+          onClick={() => { onAsk(source) }}>Ask about this repo</button>}
+        {onReindex && <button type="button" disabled={busy || pending} onClick={reindex}>{pending ? 'Queuing re-index…' : 'Re-index'}</button>}
+        {source.url && /^https:\/\/github\.com\//.test(source.url) && <a className={styles.link} href={source.url} target="_blank"
+          rel="noopener noreferrer">Open on GitHub</a>}
+      </div>
       {pending && <p className={styles.hint} role="status">Requesting re-index.</p>}
     </article>
   )
 }
 
-export function Sources({ sources, onAdd, onReindex }: {
+export function Sources({ sources, onAdd, onReindex, onAsk }: {
   sources: readonly SourceSummary[]
   onAdd: Action
-  onReindex: Action
+  onReindex?: Action
+  onAsk?: (source: SourceSummary) => void
 }) {
   const form = <AddRepositoryForm onAdd={onAdd} />
   if (sources.length === 0) return <EmptySources addForm={form} />
   return (
     <div className={styles.sources}>
       <ul className={styles.list} aria-label="Repositories">
-        {sources.map(source => <li key={source.id}><SourceCard source={source} onReindex={onReindex} /></li>)}
+        {sources.map(source => <li key={source.id}><SourceCard source={source} onReindex={onReindex} onAsk={onAsk} /></li>)}
       </ul>
       <section className={styles.card}>{form}</section>
     </div>

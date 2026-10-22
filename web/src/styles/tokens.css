@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   color-scheme: dark;
   --background: #0e1116;
   --surface: #161b22;
@@ -11,6 +11,13 @@
   --warning: #d29922;
   --danger: #f85149;
   --error-surface: color-mix(in srgb, var(--danger) 6%, var(--surface));
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 45%, var(--border));
+  --success-soft: color-mix(in srgb, var(--success) 16%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 16%, transparent);
+  --glow: color-mix(in srgb, var(--accent) 10%, transparent);
+  --shadow: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent), 0 12px 32px -16px color-mix(in srgb, var(--background) 80%, transparent);
+  --radius: 12px;
   --font-body: 15px;
   --font-metadata: 13px;
   --font-heading: clamp(1.75rem, 5vw, 2.5rem);
@@ -24,8 +31,8 @@
   background: var(--background);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
+/* Dark is the default everywhere. Light is opt-in via data-theme so OS light mode never flips the app. */
+:root[data-theme='light'] {
     color-scheme: light;
     --background: #ffffff;
     --surface: #f6f8fa;
@@ -36,7 +43,6 @@
     --accent: #0969da;
     --success: #1a7f37;
     --danger: #cf222e;
-  }
 }
 
 * {

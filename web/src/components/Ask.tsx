@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Answer } from './Answer'
 import { ErrorState, LoadingState } from './States'
 import { FAILURE, postAsk } from '../askClient'
@@ -13,9 +13,13 @@ type Result =
   | { status: 'done'; question: string; response: AnswerResponse }
   | { status: 'failed'; question: string; message: string }
 
-export function Ask({ ask = postAsk }: { ask?: AskFunction }) {
+export function Ask({ ask = postAsk, suggestions = [], initialQuestion }: {
+  ask?: AskFunction
+  suggestions?: readonly string[]
+  initialQuestion?: string
+}) {
   const id = useId()
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialQuestion ?? '')
   const [result, setResult] = useState<Result>({ status: 'idle' })
   const busy = useRef(false)
 
@@ -38,6 +42,15 @@ export function Ask({ ask = postAsk }: { ask?: AskFunction }) {
     }
   }
 
+  const asked = useRef(false)
+  useEffect(() => {
+    if (initialQuestion && !asked.current) {
+      asked.current = true
+      void submit(initialQuestion)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuestion])
+
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     void submit(text)
@@ -57,10 +70,22 @@ export function Ask({ ask = postAsk }: { ask?: AskFunction }) {
         <label htmlFor={`${id}-question`}>Your question</label>
         <p className={styles.hint} id={`${id}-hint`}>Press Enter to ask, or Shift+Enter for a new line.</p>
         <textarea id={`${id}-question`} name="question" rows={3} value={text} readOnly={pending}
-          placeholder="When are deploys frozen?" aria-describedby={`${id}-hint`}
+          placeholder="Ask anything about your team’s code and docs…" aria-describedby={`${id}-hint`}
           onChange={event => { setText(event.target.value) }} onKeyDown={onKeyDown} />
-        <div><button type="submit" disabled={pending || text.trim() === ''}>{pending ? 'Asking…' : 'Ask'}</button></div>
+        <div className={styles.formFooter}>
+          <button type="submit" className={styles.submit} disabled={pending || text.trim() === ''}>{pending ? 'Asking…' : 'Ask'}</button>
+        </div>
       </form>
+      {result.status === 'idle' && suggestions.length > 0 && <div className={styles.suggestions}>
+        <p className={styles.label}>Try asking</p>
+        <ul>
+          {suggestions.map(suggestion => <li key={suggestion}>
+            <button type="button" className={styles.suggestion} onClick={() => { setText(suggestion); void submit(suggestion) }}>
+              {suggestion}
+            </button>
+          </li>)}
+        </ul>
+      </div>}
       {result.status !== 'idle' && <section className={styles.result} aria-label="Answer">
         <p className={styles.question}><span className={styles.label}>You asked</span>{result.question}</p>
         {result.status === 'pending' && <LoadingState label="Searching the indexed sources…" />}

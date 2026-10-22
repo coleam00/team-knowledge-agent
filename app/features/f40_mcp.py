@@ -24,7 +24,7 @@ def install(
         host="127.0.0.1",
         streamable_http_path="/mcp",
         stateless_http=True,
-        json_response=True,
+        json_response=False,
         # HTTP clients omit the default port from Host and Origin headers.
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=True,

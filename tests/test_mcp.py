@@ -160,7 +160,9 @@ def test_exact_path_and_host_origin_protection(origin: str) -> None:
                 }
                 response = await client.post("/mcp", json=message, headers=headers)
                 assert response.status_code == 200 and not response.history
-                assert response.json()["result"]["serverInfo"]["name"]
+                events = [event async for event in httpx2.EventSource(response)]
+                assert len(events) == 1
+                assert json.loads(events[0].data)["result"]["serverInfo"]["name"]
                 for extra in [
                     {"Host": "attacker.invalid"},
                     {"Origin": "https://attacker.invalid"},

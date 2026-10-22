@@ -8,8 +8,9 @@ python -m app serve --port 8000
 ```
 
 Health, build identity, the web app, and existing APIs stay on that same port.
-There is no redirect required at `/mcp`. HTTP uses stateless JSON responses;
+There is no redirect required at `/mcp`. HTTP uses stateless streaming responses;
 resumable sessions and server-initiated interactions are not provided.
+Disconnecting an HTTP request cancels its in-flight tool work.
 The SDK's loopback Host/Origin validation and request limits remain enabled.
 
 For Claude Code, put an HTTP entry in your MCP configuration:

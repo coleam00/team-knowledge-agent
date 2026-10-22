@@ -51,5 +51,14 @@ Old `fake-bow-sha256-256-v1` vectors are excluded from vector matching until re-
 Tests cover the handbook freeze answer and exact lines, the parental-leave gap
 with zero answerer calls, source selection before limits, similarity boundaries,
 forged citations, and hostile source text. Feature smoke checks exercise actual
-background ingestion, HTTP answers and persistence across restart. Chat UI,
-re-index and MCP remain separate increments.
+background ingestion, HTTP answers and persistence across restart. Re-index and MCP remain separate increments.
+
+## Ask page
+
+The Ask route (`web/src/components/Ask.tsx`) posts the trimmed question once to
+`/api/ask`. Enter submits, Shift+Enter inserts a newline, and while a request is
+pending a skeleton shows and further sends are ignored. Known answers render
+through `Answer` (inline `[n]` chips and citation cards with the API's URL);
+`known: false` shows the knowledge-gap message with the add/re-index hint and no
+cards. A failure shows its message in a danger-tinted card whose Retry resubmits
+the same question once per click. Answer text is rendered as text, never HTML.

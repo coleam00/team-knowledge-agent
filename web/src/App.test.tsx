@@ -9,7 +9,7 @@ beforeEach(() => {
 
 describe('application shell', () => {
   it.each([
-    ['ask', 'Ask', 'Asking questions will be available in a later release.'],
+    ['ask', 'Ask', 'Press Enter to ask, or Shift+Enter for a new line.'],
     ['sources', 'Sources', 'Adding repositories will be available in a later release.'],
   ])('identifies the app and explains availability on %s', (route, heading, notice) => {
     window.history.replaceState(null, '', `/#/${route}`)

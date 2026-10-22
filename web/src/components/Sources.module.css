@@ -143,6 +143,12 @@
   border-color: var(--accent);
 }
 
+.card .primary:disabled {
+  color: var(--text-muted);
+  background: var(--raised);
+  border-color: var(--border);
+}
+
 .primary:hover:not(:disabled) {
   background: var(--text);
   border-color: var(--text);

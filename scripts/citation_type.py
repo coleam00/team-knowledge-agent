@@ -1,9 +1,14 @@
 import argparse
+import json
 from pathlib import Path
 
+from pydantic import RootModel
+
+from app.ask import AskResult
 from app.retrieval import Citation
 
 TARGET = Path(__file__).resolve().parents[1] / "web/src/citation.ts"
+ANSWER_TARGET = TARGET.with_name("answer.ts")
 
 
 def citation_typescript() -> str:
@@ -23,17 +28,66 @@ def citation_typescript() -> str:
     return "\n".join([*lines, "}", ""])
 
 
+def field_type(schema: object) -> str:
+    if not isinstance(schema, dict):
+        raise ValueError("Expected a field schema")
+    if "const" in schema:
+        return json.dumps(schema["const"])
+    if "$ref" in schema:
+        return str(schema["$ref"]).removeprefix("#/$defs/")
+    if schema.get("type") == "string":
+        return "string"
+    if schema.get("type") == "array":
+        item = field_type(schema["items"])
+        if schema.get("maxItems") == 0:
+            return "readonly []"
+        minimum = schema.get("minItems", 0)
+        if not isinstance(minimum, int):
+            raise ValueError("Expected an integer array minimum")
+        if minimum:
+            return "readonly [" + ", ".join([item] * minimum + [f"...{item}[]"]) + "]"
+        return f"readonly {item}[]"
+    raise ValueError(f"Unsupported answer field schema: {schema}")
+
+
+def answer_typescript() -> str:
+    schema = RootModel[AskResult].model_json_schema(mode="serialization")
+    lines = [
+        "// Derived from app.ask.AskResult; "
+        "run uv run python -m scripts.citation_type.",
+        "import type { Citation } from './citation'",
+        "",
+    ]
+    union = schema["$defs"][field_type(schema)] if "$ref" in schema else schema
+    members = [field_type(member) for member in union["anyOf"]]
+    for name in members:
+        definition = schema["$defs"][name]
+        lines.append(f"export interface {name} {{")
+        for field, value in definition["properties"].items():
+            optional = "" if field in definition["required"] else "?"
+            lines.append(f"  {field}{optional}: {field_type(value)}")
+        lines.extend(["}", ""])
+    lines.extend(["export type AnswerResponse = " + " | ".join(members), ""])
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
     arguments = parser.parse_args()
-    generated = citation_typescript()
-    if arguments.check:
-        if not TARGET.exists() or TARGET.read_text(encoding="utf-8") != generated:
-            print("Citation type is stale: run uv run python -m scripts.citation_type")
-            return 1
-    else:
-        TARGET.write_text(generated, encoding="utf-8", newline="\n")
+    for target, generated in (
+        (TARGET, citation_typescript()),
+        (ANSWER_TARGET, answer_typescript()),
+    ):
+        if arguments.check:
+            if not target.exists() or target.read_text(encoding="utf-8") != generated:
+                print(
+                    f"{target.name} is stale: "
+                    "run uv run python -m scripts.citation_type"
+                )
+                return 1
+        else:
+            target.write_text(generated, encoding="utf-8", newline="\n")
     return 0
 
 

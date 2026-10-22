@@ -24,8 +24,8 @@ export const longCitation: Citation = {
 
 export const literalText = '<script>window.citationExecuted = true</script>\n<img src=x onerror="window.citationExecuted = true">'
 
-export const citedAnswer: AnswerResponse = {
+export const citedAnswer = {
   known: true,
   answer: 'Deploys are frozen on Fridays after 14:00 UTC. [1]\nCheck the release checklist before deploying again. [2] An unmatched marker stays plain text: [99].',
   citations: [deployCitation, longCitation],
-}
+} satisfies AnswerResponse

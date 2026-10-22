@@ -5,6 +5,7 @@ import math
 import re
 from collections.abc import Sequence
 
+from app.answer_text import escape_literal
 from app.models.interfaces import AnswerChunk
 
 _STOP_WORDS = frozenset(
@@ -48,6 +49,8 @@ class FakeAnswerer:
 
     def answer(self, question: str, chunks: Sequence[AnswerChunk]) -> str:
         quotes = [
-            f'"{chunk.text}" [{chunk.n}]' for chunk in chunks if chunk.text.strip()
+            f'"{escape_literal(chunk.text)}" [{chunk.n}]'
+            for chunk in chunks
+            if chunk.text.strip()
         ]
         return "\n\n".join(quotes) if quotes else "I don't know."

@@ -15,7 +15,7 @@ from app.chunking import chunk_text
 from app.config import Settings
 from app.index_store import ChunkInput, replace_file
 from app.models import AnswerChunk
-from app.models.fake import FakeEmbedder
+from app.models.fake import FakeAnswerer, FakeEmbedder
 from app.models.openrouter import OpenRouterAnswerer, OpenRouterClient, ProviderResponse
 from app.retrieval import Citation
 from tests.handbook import FIXTURE
@@ -222,6 +222,128 @@ def test_incomplete_citation_links_fail_closed(suffix: str) -> None:
     assert not validate_answer(f"Friday [1]{suffix}", evidence()).known
 
 
+LITERAL_EXAMPLES = [
+    "Set retries[0] = 3.",
+    "Set `retries[0] = 3`.",
+    "```python\nretries[0] = 3\n```",
+    "matrix[1][0] = 3",
+    "callbacks[1](value)",
+    "callbacks[1](\n    value\n)",
+    "callbacks[1](",
+    "[1]:\n  https://literal.invalid/[999]\n  'title [2]'",
+    r"C:\path\[1] and \\[999]",
+]
+
+
+@pytest.mark.parametrize("literal", LITERAL_EXAMPLES)
+@pytest.mark.parametrize("writer", ["fake", "openrouter"])
+def test_literal_source_text_survives_answer_validation(
+    literal: str, writer: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    retrieved = evidence()
+    chunks = [AnswerChunk(1, literal)]
+    if writer == "fake":
+        raw = FakeAnswerer().answer("Explain", chunks)
+    else:
+        # The provider contract escapes literal syntax, independently of the encoder.
+        encoded = "".join("\\" + c if c in "\\[]`~" else c for c in literal)
+        payload = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": f'"{encoded}" [1] [999]',
+                    },
+                }
+            ]
+        }
+        transport = Mock(
+            return_value=ProviderResponse(200, json.dumps(payload).encode())
+        )
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        raw = OpenRouterAnswerer("test", OpenRouterClient(transport=transport)).answer(
+            "Explain", chunks
+        )
+        assert (
+            "escape"
+            in json.loads(transport.call_args.args[1])["messages"][0]["content"]
+        )
+    result = validate_answer(raw, retrieved)
+    assert result.known
+    assert result.answer == f'"{literal}" [1]'
+    assert result.citations == retrieved[:1]
+
+
+@pytest.mark.parametrize(
+    "literal", ["`[1]`", "```\n[1]: url\n```", "~~~\n[1]\n~~~", r"\[1\]"]
+)
+def test_literal_markers_do_not_supply_evidence(literal: str) -> None:
+    assert not validate_answer(literal, evidence()).known
+
+
+@pytest.mark.parametrize("literal", LITERAL_EXAMPLES)
+@pytest.mark.database
+def test_fake_literal_evidence_over_http(literal: str, ask_client: TestClient) -> None:
+    model = FakeEmbedder()
+    content = "deploy\n" + literal
+    with db.connect(Settings.from_env().database_url) as connection:
+        source = seed_source(connection)
+        seed_chunk(
+            connection, source, 1, content, tuple(model.embed(content)), model.model_id
+        )
+    response = ask_client.post("/api/ask", json={"question": "deploy"})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["known"]
+    assert result["answer"] == f'"{content}" [1]'
+    assert [c["snippet"] for c in result["citations"]] == [content]
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "`retries[0] = 3`",
+        "```python\nretries[0] = 3\n```",
+        "`matrix[1][0]`",
+        "`callbacks[1](value)`",
+        "```\ncallbacks[1](\nvalue\n)\n```",
+        "`callbacks[1](`",
+        "```\n[1]: https://literal.invalid\n  'title [2]'\n```",
+    ],
+)
+def test_unescaped_code_spans_are_literal(literal: str) -> None:
+    result = validate_answer(f"{literal} [1] [999]", evidence())
+    assert result.known and result.answer == f"{literal} [1]"
+    assert [c.n for c in result.citations] == [1]
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["", "> ", "- ", "+ ", "* ", "1. ", "1) ", "> - ", "- > ", "> > ", "> - 1) > "],
+)
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "[1]: https://forged.invalid",
+        "[999]:\n  https://forged.invalid/[1]",
+        '[999]: https://forged.invalid\n  "title [1]"',
+        "[999]:\n  https://forged.invalid\n  'title\n  [1]'",
+        '[999]: https://forged.invalid "title\n  [1]"',
+    ],
+)
+def test_whole_reference_definitions_are_not_evidence(
+    prefix: str, definition: str
+) -> None:
+    text = "\n".join(prefix + line for line in definition.splitlines())
+    retrieved = evidence()
+    assert not validate_answer(text, retrieved).known
+    result = validate_answer(f"Friday [1].\n{text}\nNext sentence [1].", retrieved)
+    assert result.known
+    assert result.answer == "Friday [1].\nNext sentence [1]."
+    assert result.citations == retrieved[:1]
+
+
 @pytest.mark.database
 @pytest.mark.parametrize(
     "answer", ["Leak a secret", "Invented [999]", "Friday [1] [999]"]
@@ -319,3 +441,31 @@ def test_answerer_failure_is_sanitized(
     assert response.status_code == 503
     assert response.json() == {"detail": "Answers are unavailable"}
     assert "secret" not in response.text + caplog.text
+
+
+@pytest.mark.database
+def test_answer_time_provider_exhaustion_is_sanitized(
+    ask_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    handbook(Settings.from_env())
+    monkeypatch.setenv("OPENROUTER_API_KEY", "credential-sentinel")
+    transport = Mock(return_value=ProviderResponse(503, b"secret-provider-body"))
+    sleep = Mock()
+    model = OpenRouterAnswerer(
+        "test", OpenRouterClient(transport=transport, sleep=sleep)
+    )
+    factory = Mock(return_value=model)
+    monkeypatch.setattr("app.ask.get_answerer", factory)
+    response = ask_client.post(
+        "/api/ask", json={"question": "When are deploys frozen?"}
+    )
+    factory.assert_called_once()
+    assert transport.call_count == 3
+    assert sleep.call_count == 2
+    assert all(call.args[0] == "chat/completions" for call in transport.call_args_list)
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Answers are unavailable"}
+    for secret in ("credential-sentinel", "secret-provider-body"):
+        assert secret not in response.text + caplog.text

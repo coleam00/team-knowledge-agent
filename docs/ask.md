@@ -20,14 +20,26 @@ the question and numbered retrieved text. OpenRouter keeps its grounding rules
 in a system message and source text in a JSON data object, never interpolating
 source instructions into the system prompt.
 
+The internal answer format distinguishes references from literal text: answerers
+backslash-escape literal backslashes, brackets, backticks and tildes. Fake mode
+encodes source text automatically; the OpenRouter system contract specifies the
+same encoding. The validator decodes literals without counting their brackets as
+citations. Markdown code spans and fences also remain literal data. Quotation
+marks alone do not exempt citations from validation.
+
 The server normalizes numeric Markdown links to plain `[n]` markers, removing
-inline destinations and reference definitions. It validates those markers against
+inline destinations and whole reference definitions (including quote/list
+containers, continuation destinations and multiline titles). It validates markers against
 retrieved chunks, removes unrecognized markers, and returns only cited evidence
 using the original numbers. If none remain, or a citation link is incomplete, it
 returns the same unknown response. Citation metadata
 and commit-pinned GitHub URLs come from retrieval, never from the model. This
 checks citation membership; real-mode semantic answer quality still needs human
 evaluation. Fake mode deterministically quotes the supplied evidence.
+
+The backend owns the answer response union, including nonempty known citations
+and empty unknown citations. `uv run python -m scripts.citation_type` generates
+the frontend types; the ordinary static gate checks that they are current.
 
 The v2 fake embedder uses 2048 SHA-256 word-count buckets and a fixed English
 stop-word list, normalized to unit length; its ID is

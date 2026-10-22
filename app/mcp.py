@@ -3,6 +3,7 @@ from collections.abc import Callable
 from mcp.server.mcpserver import MCPServer
 
 from app.config import Settings
+from app.mcp_tools import register_services as register_tools
 from app.runtime import AppRuntime
 
 ServiceRegistration = Callable[[MCPServer[None], Callable[[], Settings]], None]
@@ -11,7 +12,7 @@ ServiceRegistration = Callable[[MCPServer[None], Callable[[], Settings]], None]
 def register_production_services(
     server: MCPServer[None], get_settings: Callable[[], Settings]
 ) -> None:
-    """Production tools are delivered separately from the transport surface."""
+    register_tools(server, get_settings)
 
 
 def create_mcp_server(

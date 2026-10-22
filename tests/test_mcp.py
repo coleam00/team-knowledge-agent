@@ -29,6 +29,8 @@ from tests.mcp_support import (
     register_test_services,
 )
 
+PRODUCTION_TOOLS = ["ask", "fetch_source", "list_sources", "search"]
+
 
 @asynccontextmanager
 async def http_session(application: FastAPI) -> AsyncIterator[ClientSession]:
@@ -80,11 +82,15 @@ def test_transport_parity_and_registration_isolation(
                 assert await probe(session) == http_result
             async with http_session(production) as session:
                 await session.initialize()
-                assert (await session.list_tools()).tools == []
+                assert PRODUCTION_TOOLS == sorted(
+                    tool.name for tool in (await session.list_tools()).tools
+                )
                 assert (await session.call_tool("transport_probe", {})).is_error
             async with child_session(tmp_path, production=True) as session:
                 await session.initialize()
-                assert (await session.list_tools()).tools == []
+                assert PRODUCTION_TOOLS == sorted(
+                    tool.name for tool in (await session.list_tools()).tools
+                )
                 assert (await session.call_tool("transport_probe", {})).is_error
 
     with asyncio.Runner(loop_factory=local_event_loop) as runner:
@@ -119,7 +125,9 @@ def test_protocol_is_available_during_storage_startup(
             try:
                 assert await anyio.to_thread.run_sync(entered.wait, 5)
                 await session.initialize()
-                assert (await session.list_tools()).tools == []
+                assert PRODUCTION_TOOLS == sorted(
+                    tool.name for tool in (await session.list_tools()).tools
+                )
                 async with httpx2.AsyncClient(
                     transport=httpx2.ASGITransport(app=application),
                     base_url="http://127.0.0.1:8765",
@@ -215,7 +223,9 @@ def test_stdio_raw_output_and_eof(tmp_path: Path) -> None:
                     process.stdin.write((json.dumps(message) + "\n").encode())
                 await process.stdin.drain()
                 listed = await process.stdout.readline()
-                assert json.loads(listed)["result"]["tools"] == []
+                assert PRODUCTION_TOOLS == sorted(
+                    tool["name"] for tool in json.loads(listed)["result"]["tools"]
+                )
                 process.stdin.close()
                 trailing, diagnostics = await process.communicate()
                 assert process.returncode == 0

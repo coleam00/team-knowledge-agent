@@ -29,7 +29,7 @@ class Settings:
     ingest_max_files: int = 5000
     ingest_max_total_bytes: int = 200000000
     ingest_command_timeout_seconds: float = 120
-    chunk_window_lines: int = 8
+    chunk_window_lines: int = 80
     chunk_overlap_lines: int = 10
 
     def validate_ingest(self) -> None:

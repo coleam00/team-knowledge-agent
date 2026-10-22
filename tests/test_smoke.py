@@ -1,12 +1,16 @@
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock
+from uuid import uuid4
 
 import httpx
 import psycopg
 import pytest
 
+from app.sources import Source
 from scripts.smoke import core, run
+from scripts.smoke.features import f15_ingest as smoke
 from scripts.smoke.features import f90_unbuilt
 
 
@@ -76,3 +80,38 @@ def test_ledger_matches_discovered_migrations(
     else:
         with pytest.raises(AssertionError):
             core.ledger("test")
+
+
+def test_source_poll_is_bounded_and_failure_is_visible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = Source(
+        id=uuid4(),
+        url="https://github.com/acme/repo",
+        owner="acme",
+        name="repo",
+        status="queued",
+        indexed_commit=None,
+        indexed_at=None,
+        error=None,
+        file_count=0,
+        chunk_count=0,
+        created_at=datetime.now(UTC),
+    )
+    response = source.model_dump(mode="json")
+    with httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json=response)
+        ),
+        base_url="http://test",
+    ) as client:
+        monkeypatch.setattr(time, "monotonic", Mock(side_effect=[0, 46]))
+        with pytest.raises(TimeoutError):
+            smoke.wait_for_source(client, source)
+        response.update(status="failed", error="Explicit failure")
+        monkeypatch.setattr(time, "monotonic", lambda: 0)
+        with pytest.raises(AssertionError, match="Explicit failure"):
+            smoke.wait_for_source(client, source)
+        assert (
+            smoke.wait_for_source(client, source, "failed").error == "Explicit failure"
+        )

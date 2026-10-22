@@ -22,9 +22,4 @@ def absent_features(client: httpx.Client) -> list[dict[str, object]]:
 
 
 def before_restart(ctx: Context) -> None:
-    if ctx.sources:
-        ctx.observations["indexing"] = {
-            "stage": "not yet built",
-            "observed_status": ctx.sources[0].status,
-        }
     ctx.observations["unbuilt_features"] = absent_features(ctx.client)

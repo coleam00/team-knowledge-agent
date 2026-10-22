@@ -11,6 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import ModuleType
+from unittest.mock import patch
 
 from app.config import Settings
 from app.db import connect
@@ -62,9 +63,8 @@ def verify(observations: dict[str, object]) -> None:
         )
         environment.pop("OPENROUTER_API_KEY", None)
         observations["fresh_state"] = state
-        settings = Settings(
-            database_url, Path(state), models_mode="fake", allow_local_sources=True
-        )
+        with patch.dict(os.environ, environment, clear=True):
+            settings = Settings.from_env()
         with running_app(environment, observations, "first_start") as (process, client):
             health = wait_for_health(process, client, candidate, 200)
             observations["health"] = {

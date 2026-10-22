@@ -12,8 +12,9 @@ from fastapi.testclient import TestClient
 from psycopg import sql
 from pydantic import ValidationError
 
-from app import db, main
+from app import db, jobs, main
 from app.config import Settings
+from app.features import f15_ingest
 from app.git import git
 from app.sources import Source, source_location
 from tests.handbook import ORIGIN, create_handbook_repo
@@ -28,6 +29,7 @@ def sources_client(
     monkeypatch: pytest.MonkeyPatch,
     client_factory: ClientFactory,
 ) -> Iterator[TestClient]:
+    monkeypatch.setattr(f15_ingest, "run_worker", lambda settings, stop: None)
     monkeypatch.setenv("DATABASE_URL", database_url)
     with client_factory(main.create_app()) as client:
         wait_for_health(client, 200)
@@ -74,7 +76,9 @@ def test_registration_list_detail_and_restart(
         assert restarted.get(f"/api/sources/{uuid4()}").status_code == 404
 
 
-def test_equivalent_urls_converge_concurrently(sources_client: TestClient) -> None:
+def test_equivalent_urls_converge_concurrently(
+    sources_client: TestClient, database_url: str
+) -> None:
     urls = [
         "https://github.com/acme/handbook",
         "https://github.com/acme/handbook.git",
@@ -96,6 +100,10 @@ def test_equivalent_urls_converge_concurrently(sources_client: TestClient) -> No
     duplicate = sources_client.post("/api/sources", json={"url": urls[1]})
     assert duplicate.status_code == 409
     assert duplicate.json()["id"] == results[0][1]
+    with db.connect(database_url) as connection:
+        assert connection.execute(
+            "SELECT status, started_at, finished_at, error FROM jobs"
+        ).fetchall() == [("queued", None, None, None)]
 
 
 @pytest.mark.parametrize(
@@ -129,13 +137,29 @@ def test_equivalent_urls_converge_concurrently(sources_client: TestClient) -> No
     ],
 )
 def test_invalid_sources_create_no_rows(
-    sources_client: TestClient, url: object
+    sources_client: TestClient, database_url: str, url: object
 ) -> None:
     response = sources_client.post("/api/sources", json={"url": url})
     assert response.status_code == 422
     assert response.json()["detail"]
     assert "credential-sentinel" not in response.text
     assert sources_client.get("/api/sources").json() == []
+    with db.connect(database_url) as connection:
+        assert connection.execute("SELECT count(*) FROM jobs").fetchone() == (0,)
+
+
+def test_job_insert_failure_rolls_back_registration(
+    sources_client: TestClient, database_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*args: object) -> None:
+        raise psycopg.OperationalError("credential-sentinel")
+
+    monkeypatch.setattr(jobs, "enqueue", fail)
+    response = sources_client.post("/api/sources", json={"url": ORIGIN})
+    assert response.status_code == 503
+    with db.connect(database_url) as connection:
+        assert connection.execute("SELECT count(*) FROM sources").fetchone() == (0,)
+        assert connection.execute("SELECT count(*) FROM jobs").fetchone() == (0,)
 
 
 @pytest.mark.parametrize(

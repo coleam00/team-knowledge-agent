@@ -15,34 +15,42 @@ from app.models.fake import FakeAnswerer, FakeEmbedder
 
 
 def test_fixed_vector_counts_and_token_hashes() -> None:
-    # SHA-256 modulo 256: deploy=174, friday=184, freeze=227.
+    # SHA-256 modulo 2048: deploy=1198, friday=1976, freeze=995.
     # Pin the full vector, not a second implementation of the hash algorithm.
-    expected = [0.0] * 256
-    expected[174], expected[184], expected[227] = (
+    expected = [0.0] * 2048
+    expected[1198], expected[1976], expected[995] = (
         2 / math.sqrt(6),
         1 / math.sqrt(6),
         1 / math.sqrt(6),
     )
     embedder = get_embedder()
-    assert embedder.model_id == "fake-bow-sha256-256-v1"
+    assert embedder.model_id == "fake-bow-sha256-2048-v2"
     assert embedder.embed("Deploy, DEPLOY! Friday freeze.") == expected
     assert embedder.embed("freeze friday deploy deploy") == expected
 
 
-def test_unicode_identifiers_digits_and_hash_collisions() -> None:
-    expected = [0.0] * 256
-    # banana and café intentionally collide in bucket 78; counts must add.
-    expected[78], expected[205], expected[227] = (
-        2 / math.sqrt(6),
-        1 / math.sqrt(6),
-        1 / math.sqrt(6),
-    )
+def test_unicode_identifiers_and_digits() -> None:
+    expected = [0.0] * 2048
+    for bucket in (1870, 1614, 1485, 739):
+        expected[bucket] = 0.5
     assert get_embedder().embed("CAF\u00c9 banana rotate_api_keys 123") == expected
+
+
+def test_hash_collisions_add_counts() -> None:
+    expected = [0.0] * 2048
+    expected[1603], expected[1198] = 2 / math.sqrt(5), 1 / math.sqrt(5)
+    assert get_embedder().embed("word34 word60 deploy") == expected
+
+
+def test_fixed_stop_words_do_not_contribute_similarity() -> None:
+    model = get_embedder()
+    assert model.embed("When are the deploys frozen?") == model.embed("deploys frozen")
+    assert model.embed("what is the") == [0.0] * 2048
 
 
 @pytest.mark.parametrize("text", ["", " \t\n", "!?.,—"])
 def test_empty_or_wordless_text_is_zero(text: str) -> None:
-    assert get_embedder().embed(text) == [0.0] * 256
+    assert get_embedder().embed(text) == [0.0] * 2048
 
 
 @pytest.mark.parametrize(
@@ -50,7 +58,7 @@ def test_empty_or_wordless_text_is_zero(text: str) -> None:
 )
 def test_nonzero_vectors_have_unit_norm(text: str) -> None:
     vector = get_embedder().embed(text)
-    assert len(vector) == 256
+    assert len(vector) == 2048
     assert all(math.isfinite(value) for value in vector)
     assert abs(math.sqrt(sum(value * value for value in vector)) - 1) < 1e-6
 

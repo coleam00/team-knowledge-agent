@@ -11,7 +11,6 @@ def absent_features(client: httpx.Client) -> list[dict[str, object]]:
     observations: list[dict[str, object]] = []
     for method, path in [
         ("POST", "/api/sources/1/reindex"),
-        ("POST", "/api/ask"),
         ("POST", "/mcp"),
     ]:
         response = client.request(method, path)

@@ -1,4 +1,5 @@
 import math
+from collections.abc import Set
 from fractions import Fraction
 from urllib.parse import quote
 from uuid import UUID
@@ -72,6 +73,7 @@ def search(
     query: str,
     *,
     source_id: UUID | None = None,
+    source_ids: Set[UUID] | None = None,
     limit: int = 10,
     embedder: Embedder | None = None,
 ) -> list[Citation]:
@@ -82,6 +84,13 @@ def search(
         )
     if source_id is not None and not isinstance(source_id, UUID):
         raise InvalidSearch("source_id must be a UUID")
+    if source_ids is not None:
+        if source_id is not None:
+            raise InvalidSearch("Use source_id or source_ids, not both")
+        if not all(isinstance(value, UUID) for value in source_ids):
+            raise InvalidSearch("source_ids must contain UUIDs")
+        if not source_ids:
+            return []
     if not settings.database_url:
         raise SearchUnavailable("Search is unavailable")
     try:
@@ -100,6 +109,7 @@ def search(
                 embedding_model=model.model_id,
                 min_similarity=settings.search_min_similarity,
                 source_id=source_id,
+                source_ids=source_ids,
             )
     except psycopg.Error:
         raise SearchUnavailable("Search is unavailable") from None

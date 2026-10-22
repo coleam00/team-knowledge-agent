@@ -7,7 +7,7 @@ Ask questions about your team's code and docs and get answers with citations. Bu
 The app provides the application page, database migrations, health, build
 identity, a persistent source registry, and [hybrid search](docs/search.md) with
 commit-pinned citations over stored chunks. Accepted sources are indexed in the
-background and become ready or failed with an error. Answers and MCP are not built yet.
+background and become ready or failed with an error. [Grounded answers](docs/ask.md) are available through `/api/ask`; MCP is not built yet.
 The model library provides deterministic fake embeddings and a quoting answerer.
 Search embeds each query with the active model. The [acquisition library](docs/file-selection.md)
 clones and selects commit-pinned text for the background worker.

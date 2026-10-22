@@ -397,3 +397,46 @@ def test_unusable_embedding_fails_before_database(
 def test_direct_invalid_input(tmp_path: Path, query: str, limit: int) -> None:
     with pytest.raises(ValueError):
         search(Settings(None, tmp_path), query, limit=limit)
+
+
+@pytest.mark.database
+@pytest.mark.parametrize("mode,threshold", [("fake", 0.25), ("real", 0.35)])
+def test_similarity_boundary_is_inclusive(
+    settings: Settings, mode: str, threshold: float
+) -> None:
+    exact = (1.0,) * 16 if mode == "fake" else (7.0, 18.0, 5.0, 1.0, 1.0)
+    dimensions = len(exact)
+    query = [1.0] + [0.0] * (dimensions - 1)
+    with db.connect(settings.database_url) as connection:
+        source = seed_source(connection)
+        for identity, score in [(1, threshold - 0.001), (3, threshold + 0.001)]:
+            vector = (score, math.sqrt(1 - score * score)) + (0.0,) * (dimensions - 2)
+            seed_chunk(connection, source, identity, "semantic", vector)
+        seed_chunk(connection, source, 2, "semantic", exact)
+        seed_chunk(connection, source, 4, "deploy", tuple([0.0] * dimensions))
+    results = search(
+        replace(settings, models_mode=mode), "deploy", embedder=FixedEmbedder(query)
+    )
+    assert {c.path for c in results} == {"2.md", "3.md", "4.md"}
+
+
+def test_empty_source_selection_does_not_need_models_or_database(
+    tmp_path: Path,
+) -> None:
+    assert search(Settings(None, tmp_path), "deploy", source_ids=set()) == []
+    with pytest.raises(ValueError, match="not both"):
+        search(Settings(None, tmp_path), "deploy", source_id=uuid4(), source_ids=set())
+
+
+@pytest.mark.database
+def test_old_fake_vectors_keep_only_lexical_eligibility(settings: Settings) -> None:
+    with db.connect(settings.database_url) as connection:
+        source = seed_source(connection)
+        seed_chunk(
+            connection, source, 1, "deploy", (1.0,) * 256, "fake-bow-sha256-256-v1"
+        )
+        seed_chunk(
+            connection, source, 2, "unrelated", (1.0,) * 256, "fake-bow-sha256-256-v1"
+        )
+    assert [c.path for c in search(settings, "deploy")] == ["1.md"]
+    assert search(settings, "freeze") == []

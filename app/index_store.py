@@ -1,5 +1,5 @@
 import json
-from collections.abc import Sequence
+from collections.abc import Sequence, Set
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -137,6 +137,7 @@ def hybrid_candidates(
     embedding_model: str,
     min_similarity: float,
     source_id: UUID | None = None,
+    source_ids: Set[UUID] | None = None,
 ) -> list[SearchCandidate]:
     # One statement binds ranking, content and commit to the same MVCC snapshot.
     with connection.cursor(row_factory=dict_row) as cursor:
@@ -146,6 +147,7 @@ def hybrid_candidates(
                 SELECT c.*, s.owner, s.name, s.indexed_commit
                 FROM chunks c JOIN sources s ON s.id = c.source_id
                 WHERE (%(source)s::uuid IS NULL OR c.source_id = %(source)s)
+                  AND (%(sources)s::uuid[] IS NULL OR c.source_id = ANY(%(sources)s))
                   AND s.indexed_commit ~ '^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$'
             ), lexical AS (
                 SELECT id, row_number() OVER (
@@ -180,6 +182,7 @@ def hybrid_candidates(
             """,
             {
                 "source": source_id,
+                "sources": sorted(source_ids) if source_ids is not None else None,
                 "query": query,
                 "model": embedding_model,
                 "vector": json.dumps(list(query_embedding), allow_nan=False),

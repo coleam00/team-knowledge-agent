@@ -12,14 +12,18 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   )
 }
 
-export function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+export function ErrorState({ message, onRetry, retryLabel = 'Try again' }: {
+  message: string
+  onRetry: () => void
+  retryLabel?: string
+}) {
   return (
     <div className={`${styles.card} ${styles.error}`}>
       <div role="alert">
         <h2>Something went wrong</h2>
         <p>{message}</p>
       </div>
-      <button type="button" onClick={onRetry}>Try again</button>
+      <button type="button" onClick={onRetry}>{retryLabel}</button>
     </div>
   )
 }

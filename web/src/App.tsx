@@ -1,4 +1,5 @@
 ﻿import { useSyncExternalStore } from 'react'
+import { Ask } from './components/Ask'
 import { EmptySources } from './components/States'
 import styles from './App.module.css'
 
@@ -55,12 +56,7 @@ export default function App() {
             </p>
           </header>
           {route === 'ask' ? (
-            <section className={styles.welcome} aria-labelledby="welcome-title">
-              <h2 id="welcome-title">Good answers start with sources</h2>
-              <p>Answers will point back to the files and lines that support them.</p>
-              <a className={styles.action} href="#/sources">Explore sources <span aria-hidden="true">→</span></a>
-              <p className={styles.note}>Asking questions will be available in a later release.</p>
-            </section>
+            <Ask />
           ) : (
             <EmptySources addForm={
               <p className={styles.note}>Adding repositories will be available in a later release.</p>

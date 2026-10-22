@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import db, main
-from app.ask import UNKNOWN_ANSWER, ask, validate_answer
+from app.ask import UNKNOWN_ANSWER, UnknownAnswer, ask, validate_answer
 from app.chunking import chunk_text
 from app.config import Settings
 from app.index_store import ChunkInput, replace_file
@@ -313,9 +313,75 @@ def test_fake_literal_evidence_over_http(literal: str, ask_client: TestClient) -
     ],
 )
 def test_unescaped_code_spans_are_literal(literal: str) -> None:
-    result = validate_answer(f"{literal} [1] [999]", evidence())
-    assert result.known and result.answer == f"{literal} [1]"
+    result = validate_answer(f"{literal}\n[1] [999]", evidence())
+    assert result.known and result.answer == f"{literal}\n[1]"
     assert [c.n for c in result.citations] == [1]
+
+
+@pytest.mark.parametrize("delimiter", ["`", "~"])
+@pytest.mark.parametrize("length", [3, 4])
+@pytest.mark.parametrize(
+    "body_kind", ["mid-line", "trailing-text", "indented", "shorter", "opposite"]
+)
+def test_fence_body_delimiters_cannot_supply_evidence(
+    delimiter: str, length: int, body_kind: str
+) -> None:
+    fence = delimiter * length
+    body_line = {
+        "mid-line": f'print("{fence}")',
+        "trailing-text": f"{fence} text",
+        "indented": f"    {fence}",
+        "shorter": delimiter * (length - 1),
+        "opposite": ("~" if delimiter == "`" else "`") * length,
+    }[body_kind]
+    literal = f"{fence}text\n{body_line}\n[1]\n[999]"
+    retrieved = evidence()
+    assert validate_answer(literal, retrieved) == UnknownAnswer()
+    literal += f"\n{fence}"
+    assert validate_answer(literal, retrieved) == UnknownAnswer()
+    result = validate_answer(f"{literal}\nActual answer [2] [999]", retrieved)
+    assert result.known and result.answer == f"{literal}\nActual answer [2]"
+    assert result.citations == retrieved[1:]
+    quoted = FakeAnswerer().answer("Explain", [AnswerChunk(2, literal)])
+    result = validate_answer(quoted, retrieved)
+    assert result.known and result.answer == f'"{literal}" [2]'
+    assert result.citations == retrieved[1:]
+
+
+@pytest.mark.parametrize("delimiter", ["`", "~"])
+@pytest.mark.parametrize("length", [3, 4])
+@pytest.mark.parametrize("extra", [0, 1, 3])
+@pytest.mark.parametrize(
+    "indent,trailing,newline", [("", "", "\n"), ("   ", " \t", "\r\n")]
+)
+def test_fence_closing_lines_leave_following_citations_eligible(
+    delimiter: str, length: int, extra: int, indent: str, trailing: str, newline: str
+) -> None:
+    literal = newline.join(
+        [
+            indent + delimiter * length + "text",
+            "[1]\n[999]",
+            indent + delimiter * (length + extra) + trailing,
+        ]
+    )
+    retrieved = evidence()
+    assert validate_answer(literal, retrieved) == UnknownAnswer()
+    result = validate_answer(f"{literal}{newline}Actual answer [2] [999]", retrieved)
+    assert (
+        result.known and result.answer == f"{literal}{newline}Actual answer [2]".strip()
+    )
+    assert result.citations == retrieved[1:]
+
+
+@pytest.mark.parametrize("length", [1, 2, 3, 4])
+def test_inline_code_uses_exact_backtick_runs(length: int) -> None:
+    delimiter = "`" * length
+    literal = f"Example {delimiter}[1] {'`' * (length + 1)} [999]{delimiter}"
+    retrieved = evidence()
+    assert validate_answer(literal, retrieved) == UnknownAnswer()
+    result = validate_answer(f"{literal} [2]", retrieved)
+    assert result.known and result.answer == f"{literal} [2]"
+    assert result.citations == retrieved[1:]
 
 
 @pytest.mark.parametrize(

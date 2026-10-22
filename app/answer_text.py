@@ -101,12 +101,22 @@ def code_end(text: str, start: int) -> int | None:
     while end < len(text) and text[end] == char:
         end += 1
     delimiter = text[start:end]
-    if char == "~" and len(delimiter) < 3:
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    line_end = len(text) if line_end < 0 else line_end
+    if (
+        len(delimiter) >= 3
+        and re.fullmatch(r" {0,3}", text[line_start:start])
+        and (char == "~" or "`" not in text[end:line_end])
+    ):
+        closing = re.compile(
+            rf"^ {{0,3}}{char}{{{len(delimiter)},}}[ \t]*\r?$", re.MULTILINE
+        ).search(text, line_end + 1)
+        return closing.end() if closing else len(text)
+    if char == "~":
         return None
     closing = re.search(rf"(?<!{char}){re.escape(delimiter)}(?!{char})", text[end:])
-    if closing:
-        return end + closing.end()
-    return len(text) if len(delimiter) >= 3 else None
+    return end + closing.end() if closing else None
 
 
 def answer_tokens(text: str) -> Iterator[tuple[str, str | None]]:

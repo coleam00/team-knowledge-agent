@@ -14,7 +14,7 @@ from scripts.smoke.features import f15_ingest as smoke
 from scripts.smoke.features import f90_unbuilt
 
 
-def test_absent_features_exclude_delivered_search() -> None:
+def test_absent_features_exclude_delivered_search_and_ask() -> None:
     paths: list[str] = []
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -25,7 +25,7 @@ def test_absent_features_exclude_delivered_search() -> None:
         transport=httpx.MockTransport(respond), base_url="http://test"
     ) as client:
         observations = f90_unbuilt.absent_features(client)
-    assert paths == ["/api/sources/1/reindex", "/api/ask"]
+    assert paths == ["/api/sources/1/reindex"]
     assert all(item["stage"] == "not yet built" for item in observations)
 
 

@@ -539,7 +539,7 @@ def test_empty_model_ids_refuse_startup(
 
 def test_fake_mode_ignores_invalid_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "invalid key")
-    assert get_embedder().model_id == "fake-bow-sha256-256-v1"
+    assert get_embedder().model_id == "fake-bow-sha256-2048-v2"
     assert get_answerer().answer("?", []) == "I don't know."
 
 

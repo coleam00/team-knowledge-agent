@@ -2,14 +2,10 @@ import { useId, useRef, useState, type Ref } from 'react'
 import { UnknownAnswer } from './States'
 import styles from './Answer.module.css'
 import type { Citation } from '../citation'
+import type { AnswerResponse } from '../answer'
 
 export type { Citation } from '../citation'
-
-export interface AnswerResponse {
-  known: boolean
-  answer: string
-  citations: readonly Citation[]
-}
+export type { AnswerResponse } from '../answer'
 
 function displayPath(path: string) {
   if (path.length <= 48) return path

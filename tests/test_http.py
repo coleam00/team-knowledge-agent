@@ -235,7 +235,7 @@ def test_missing_web_build_and_unbuilt_routes(
         assert client.get("/api/sources").status_code == 503
         assert client.get("/api/search?q=deploy").status_code == 503
         assert client.get("/assets/missing.js").status_code == 404
-        assert client.post("/api/ask", json={"question": "hello"}).status_code == 404
+        assert client.post("/api/ask", json={"question": "hello"}).status_code == 503
 
 
 def test_serves_actual_html_and_assets(

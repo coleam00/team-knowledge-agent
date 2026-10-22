@@ -22,7 +22,7 @@ The synchronous `Embedder.embed(text)` posts one input to
 `https://openrouter.ai/api/v1/embeddings`, requesting float encoding. It requires
 one result with index zero and a nonempty finite numeric vector, preserving
 coordinate order and the model's dimensions. It does not impose the fake model's
-256 dimensions on real embeddings. The background worker stores each returned
+2048 dimensions on real embeddings. The background worker stores each returned
 vector and the embedder's actual `model_id` with its chunk, so stored vectors keep
 their model identity.
 
@@ -31,8 +31,8 @@ message requires answers grounded in numbered sources. The user message encodes
 the question and ordered source records as JSON data, preserving text and marker
 numbers even when the text contains delimiter-like instructions. Blank evidence
 returns `I don't know.` without a provider call. Only completed, nonempty assistant
-text is accepted. Retrieval and citation validation remain the later `/ask`
-capability; a prompt alone does not enforce citation correctness.
+text is accepted. The shared [ask service](ask.md) retrieves relevant evidence and validates
+citation markers; a prompt alone does not enforce citation correctness.
 
 Each attempt uses a 30-second socket timeout and a remaining time budget between
 connection, request, headers, and body reads. There are at most three attempts,

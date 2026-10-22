@@ -30,5 +30,8 @@ class Embedder(Protocol):
 
 class Answerer(Protocol):
     def answer(self, question: str, chunks: Sequence[AnswerChunk]) -> str:
-        """Answer from supplied data, using the chunks' own numeric markers."""
+        r"""Use bare [n] citations; escape literal \, [, ], ` and ~ with a backslash.
+
+        The shared validator decodes escaped text without treating it as references.
+        """
         ...

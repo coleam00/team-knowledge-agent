@@ -118,6 +118,7 @@ describe('answer citations', () => {
   })
 
   it('renders the honest gap with no citations even if the response carries stale content', () => {
+    // @ts-expect-error Malformed external data violates the generated response contract.
     render(<Answer response={{ ...citedAnswer, known: false }} />)
     expect(screen.getByRole('status')).toHaveTextContent('I couldn’t find this in the indexed sources.')
     expect(screen.queryByRole('article')).not.toBeInTheDocument()

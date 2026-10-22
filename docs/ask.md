@@ -31,8 +31,9 @@ The server normalizes numeric Markdown links to plain `[n]` markers, removing
 inline destinations and whole reference definitions (including quote/list
 containers, continuation destinations and multiline titles). It validates markers against
 retrieved chunks, removes unrecognized markers, and returns only cited evidence
-using the original numbers. If none remain, or a citation link is incomplete, it
-returns the same unknown response. Citation metadata
+using the original numbers. If none remain, a citation link is incomplete, or a link or
+reference definition would reach into a code fence, it returns the same unknown
+response. Citation metadata
 and commit-pinned GitHub URLs come from retrieval, never from the model. This
 checks citation membership; real-mode semantic answer quality still needs human
 evaluation. Fake mode deterministically quotes the supplied evidence.

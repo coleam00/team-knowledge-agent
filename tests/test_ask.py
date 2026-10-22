@@ -399,6 +399,36 @@ FENCE_CONTAINERS = [
 ]
 
 
+# "12. " is left out: an ordered list not starting at 1 cannot interrupt the
+# preceding paragraph, so CommonMark parses no fence there at all.
+@pytest.mark.parametrize(
+    "opening,continuation",
+    [("", ""), *(item for item in FENCE_CONTAINERS if item[0] != "12. ")],
+)
+@pytest.mark.parametrize("delimiter", ["`", "~"])
+def test_links_and_definitions_cannot_cross_into_a_fence(
+    opening: str, continuation: str, delimiter: str
+) -> None:
+    fence = delimiter * 3
+    crossing_link = "\n".join(
+        [
+            "[999](",
+            opening + fence,
+            continuation + ")",
+            continuation + "[1]",
+            continuation + fence,
+        ]
+    )
+    crossing_definition = "\n".join(
+        ["[label]:", opening + fence, continuation + "[1]", continuation + fence]
+    )
+    retrieved = evidence()
+    for literal in (crossing_link, crossing_definition):
+        assert validate_answer(literal, retrieved) == UnknownAnswer()
+        mixed = f"{literal}\nActual answer [2] [999]"
+        assert validate_answer(mixed, retrieved) == UnknownAnswer()
+
+
 @pytest.mark.parametrize("opening,continuation", FENCE_CONTAINERS)
 @pytest.mark.parametrize("delimiter", ["`", "~"])
 @pytest.mark.parametrize(

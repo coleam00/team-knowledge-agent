@@ -136,9 +136,14 @@ def answer_tokens(text: str) -> Iterator[tuple[str, str | None]]:
             yield text[position:fence_end], None
             position = fence_end
             continue
+        # Nothing may consume a following block's opening fence: inline spans stop
+        # before it, and a definition or citation link reaching into it fails closed.
+        stop = fence_starts[bisect_right(fence_starts, position)]
         if position == 0 or text[position - 1] == "\n":
             end = definition_end(text, position)
             if end is not None:
+                if end > stop:
+                    raise ValueError("Reference definition crosses a code fence")
                 position = end
                 continue
         if (
@@ -149,8 +154,6 @@ def answer_tokens(text: str) -> Iterator[tuple[str, str | None]]:
             yield text[position + 1], None
             position += 2
             continue
-        # Inline spans cannot consume a following block's opening fence.
-        stop = fence_starts[bisect_right(fence_starts, position)]
         end = code_end(text, position, stop)
         if end is not None:
             yield text[position:end], None
@@ -160,6 +163,8 @@ def answer_tokens(text: str) -> Iterator[tuple[str, str | None]]:
             end = citation_link_end(text, match.end())
             if end is None:
                 raise ValueError("Incomplete citation link")
+            if end > stop:
+                raise ValueError("Citation link crosses a code fence")
             yield match[0], match[1]
             position = end
             continue

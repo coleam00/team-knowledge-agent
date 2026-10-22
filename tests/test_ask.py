@@ -187,16 +187,39 @@ def test_only_cited_retrieved_numbers_survive() -> None:
     assert validate_answer("Friday [2]", retrieved).citations == retrieved[1:]
 
 
-def test_model_reference_urls_cannot_override_citations() -> None:
+@pytest.mark.parametrize(
+    "suffix,definitions",
+    [
+        ("(https://forged.invalid)", ""),
+        ("(https://forged.invalid/a(b(c)))", ""),
+        (r"(https://forged.invalid/a\(b\))", ""),
+        (r"(https://forged.invalid/a\)b)", ""),
+        ('(https://forged.invalid "title ) here")', ""),
+        ("(<https://forged.invalid/a)b>)", ""),
+        ("[destination]", "[destination]: https://forged.invalid\n"),
+        ("[999]", "[999]: https://forged.invalid\n"),
+        ("[]", "[1]: https://forged.invalid\n[999]: https://forged.invalid\n"),
+        ("", "[1]: https://forged.invalid\n[999]: https://forged.invalid\n"),
+    ],
+)
+def test_model_reference_urls_cannot_override_citations(
+    suffix: str,
+    definitions: str,
+) -> None:
     retrieved = evidence()
     result = validate_answer(
-        "Friday [1](https://forged.invalid). [999](https://forged.invalid)\n"
-        "[1]: https://forged.invalid\n[999]: https://forged.invalid\n",
+        f"Friday [1]{suffix}. [999]{suffix}\n{definitions}",
         retrieved,
     )
     assert result.known and result.answer == "Friday [1]."
     assert result.citations == retrieved[:1]
     assert not validate_answer("[1]: https://forged.invalid", retrieved).known
+    assert not validate_answer(f"[999]{suffix}\n{definitions}", retrieved).known
+
+
+@pytest.mark.parametrize("suffix", ["(https://forged.invalid/a(b)", "[destination"])
+def test_incomplete_citation_links_fail_closed(suffix: str) -> None:
+    assert not validate_answer(f"Friday [1]{suffix}", evidence()).known
 
 
 @pytest.mark.database

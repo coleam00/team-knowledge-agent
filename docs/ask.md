@@ -20,9 +20,11 @@ the question and numbered retrieved text. OpenRouter keeps its grounding rules
 in a system message and source text in a JSON data object, never interpolating
 source instructions into the system prompt.
 
-The server validates numeric `[n]` markers against retrieved chunks, removes
-unrecognized markers and model-authored reference URLs, and returns only cited evidence using the original
-numbers. If none remain, it returns the same unknown response. Citation metadata
+The server normalizes numeric Markdown links to plain `[n]` markers, removing
+inline destinations and reference definitions. It validates those markers against
+retrieved chunks, removes unrecognized markers, and returns only cited evidence
+using the original numbers. If none remain, or a citation link is incomplete, it
+returns the same unknown response. Citation metadata
 and commit-pinned GitHub URLs come from retrieval, never from the model. This
 checks citation membership; real-mode semantic answer quality still needs human
 evaluation. Fake mode deterministically quotes the supplied evidence.

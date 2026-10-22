@@ -10,8 +10,9 @@ from app.models import AnswerChunk, Answerer, Embedder, get_answerer
 from app.retrieval import Citation, search
 
 UNKNOWN_ANSWER = "I don't know. I couldn't find this in the indexed sources."
-_REFERENCE = re.compile(r"(?m)^[ \t]{0,3}\[[0-9]+\]:[^\r\n]*(?:\r?\n|$)")
-_MARKER = re.compile(r"\[([0-9]+)\](?:\([^()\r\n]*\))?")
+_REFERENCE = re.compile(r"(?m)^[ \t]{0,3}\[(?:\\.|[^\]\\\r\n])+\]:[^\r\n]*(?:\r?\n|$)")
+_MARKER = re.compile(r"\[([0-9]+)\]")
+_REFERENCE_LABEL = re.compile(r"\[(?:\\.|[^\]\\\r\n])*\]")
 
 
 class KnownAnswer(BaseModel):
@@ -35,22 +36,59 @@ class AskUnavailable(RuntimeError):
     pass
 
 
+def citation_link_end(text: str, start: int) -> int | None:
+    if text[start : start + 1] == "[":
+        label = _REFERENCE_LABEL.match(text, start)
+        return label.end() if label else None
+    if text[start : start + 1] != "(":
+        return start
+    depth = 1
+    quoted_until = ""
+    position = start + 1
+    while position < len(text):
+        char = text[position]
+        if char == "\\":
+            position += 2
+            continue
+        if quoted_until:
+            if char == quoted_until:
+                quoted_until = ""
+        elif char == "<":
+            quoted_until = ">"
+        elif char in "\"'" and text[position - 1].isspace():
+            quoted_until = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return position + 1
+        position += 1
+    return None
+
+
 def validate_answer(answer: str, retrieved: list[Citation]) -> AskResult:
     available = {str(c.n): c for c in retrieved}
     cited: set[str] = set()
-
-    def marker(match: re.Match[str]) -> str:
+    text = _REFERENCE.sub("", answer)
+    parts: list[str] = []
+    position = 0
+    while match := _MARKER.search(text, position):
+        parts.append(text[position : match.start()])
+        end = citation_link_end(text, match.end())
+        if end is None:
+            return UnknownAnswer()
         number = match[1]
-        if number not in available:
-            return ""
-        cited.add(number)
-        return f"[{number}]"
-
-    cleaned = _MARKER.sub(marker, _REFERENCE.sub("", answer)).strip()
+        if number in available:
+            cited.add(number)
+            parts.append(f"[{number}]")
+        position = end
+    parts.append(text[position:])
     if not cited:
         return UnknownAnswer()
     return KnownAnswer(
-        answer=cleaned, citations=[c for c in retrieved if str(c.n) in cited]
+        answer="".join(parts).strip(),
+        citations=[c for c in retrieved if str(c.n) in cited],
     )
 
 

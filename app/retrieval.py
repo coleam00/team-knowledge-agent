@@ -91,6 +91,8 @@ def search(
             raise InvalidSearch("source_ids must contain UUIDs")
         if not source_ids:
             return []
+    if source_id is not None:
+        source_ids = {source_id}
     if not settings.database_url:
         raise SearchUnavailable("Search is unavailable")
     try:
@@ -108,7 +110,6 @@ def search(
                 query_embedding=vector,
                 embedding_model=model.model_id,
                 min_similarity=settings.search_min_similarity,
-                source_id=source_id,
                 source_ids=source_ids,
             )
     except psycopg.Error:

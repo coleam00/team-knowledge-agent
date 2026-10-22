@@ -200,7 +200,7 @@ def test_branch_bounds_filtering_and_deterministic_fusion(settings: Settings) ->
             query_embedding=[1, 0],
             embedding_model="active",
             min_similarity=0.25,
-            source_id=source,
+            source_ids={source},
         )
         lexical = sorted((c.fts_rank, c.id.int) for c in candidates if c.fts_rank)
         semantic = sorted(

@@ -1,8 +1,12 @@
 """Answer syntax: escaped literals and code spans are data; bare [n] are references."""
 
 import re
+from bisect import bisect_right
 from collections.abc import Iterator
 
+from markdown_it import MarkdownIt
+
+_MARKDOWN = MarkdownIt("commonmark")
 _ESCAPABLE = "\\[]`~"
 _CONTAINERS = re.compile(r"[ \t]*(?:(?:>|[-+*][ \t]+|[0-9]+[.)][ \t]+)[ \t]*)*")
 _DEFINITION = re.compile(r"\[(?:\\.|[^\]\\\r\n])+\]:[ \t]*(.*)")
@@ -93,36 +97,45 @@ def citation_link_end(text: str, start: int) -> int | None:
     return None
 
 
-def code_end(text: str, start: int) -> int | None:
+def code_fences(text: str) -> dict[int, int]:
+    """Map CommonMark fence lines back to untouched provider text.
+
+    Block parsing owns container continuation and closing rules. Only positions
+    are used: rendering/normalizing the parsed content would corrupt literals.
+    """
+    offsets = [0, *(match.end() for match in re.finditer(r"\r\n?|\n", text))]
+    if offsets[-1] != len(text):
+        offsets.append(len(text))
+    return {
+        offsets[token.map[0]]: offsets[token.map[1]]
+        for token in _MARKDOWN.parse(text)
+        if token.type == "fence" and token.map is not None
+    }
+
+
+def code_end(text: str, start: int, stop: int) -> int | None:
     char = text[start]
-    if char not in "`~":
+    if char != "`":
         return None
     end = start + 1
     while end < len(text) and text[end] == char:
         end += 1
     delimiter = text[start:end]
-    line_start = text.rfind("\n", 0, start) + 1
-    line_end = text.find("\n", end)
-    line_end = len(text) if line_end < 0 else line_end
-    if (
-        len(delimiter) >= 3
-        and re.fullmatch(r" {0,3}", text[line_start:start])
-        and (char == "~" or "`" not in text[end:line_end])
-    ):
-        closing = re.compile(
-            rf"^ {{0,3}}{char}{{{len(delimiter)},}}[ \t]*\r?$", re.MULTILINE
-        ).search(text, line_end + 1)
-        return closing.end() if closing else len(text)
-    if char == "~":
-        return None
-    closing = re.search(rf"(?<!{char}){re.escape(delimiter)}(?!{char})", text[end:])
+    closing = re.search(rf"(?<!{char}){re.escape(delimiter)}(?!{char})", text[end:stop])
     return end + closing.end() if closing else None
 
 
 def answer_tokens(text: str) -> Iterator[tuple[str, str | None]]:
     """Yield literal text or a citation number; malformed links fail closed."""
+    fences = code_fences(text)
+    fence_starts = [*sorted(fences), len(text)]
     position = 0
     while position < len(text):
+        if position in fences:
+            fence_end = fences[position]
+            yield text[position:fence_end], None
+            position = fence_end
+            continue
         if position == 0 or text[position - 1] == "\n":
             end = definition_end(text, position)
             if end is not None:
@@ -136,7 +149,9 @@ def answer_tokens(text: str) -> Iterator[tuple[str, str | None]]:
             yield text[position + 1], None
             position += 2
             continue
-        end = code_end(text, position)
+        # Inline spans cannot consume a following block's opening fence.
+        stop = fence_starts[bisect_right(fence_starts, position)]
+        end = code_end(text, position, stop)
         if end is not None:
             yield text[position:end], None
             position = end

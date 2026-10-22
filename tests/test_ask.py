@@ -384,6 +384,154 @@ def test_inline_code_uses_exact_backtick_runs(length: int) -> None:
     assert result.citations == retrieved[1:]
 
 
+FENCE_CONTAINERS = [
+    ("> ", "> "),
+    (">", ">"),
+    ("- ", "  "),
+    ("+ ", "  "),
+    ("* ", "  "),
+    ("12. ", "    "),
+    ("1) ", "   "),
+    ("> - ", ">   "),
+    ("- > ", "  > "),
+    ("> > ", "> > "),
+    ("> - 1) > ", ">      > "),
+]
+
+
+@pytest.mark.parametrize("opening,continuation", FENCE_CONTAINERS)
+@pytest.mark.parametrize("delimiter", ["`", "~"])
+@pytest.mark.parametrize(
+    "extra,indent,trailing,newline",
+    [
+        (0, "", "", "\n"),
+        (1, "", "", "\n"),
+        (3, "   ", " \t", "\r\n"),
+    ],
+)
+def test_container_fences_keep_literals_and_following_references(
+    opening: str,
+    continuation: str,
+    delimiter: str,
+    extra: int,
+    indent: str,
+    trailing: str,
+    newline: str,
+) -> None:
+    literal = newline.join(
+        [
+            opening + delimiter * 3 + "text",
+            continuation + "[1] [999]",
+            continuation + "[1]: https://literal.invalid/[999]",
+            continuation + indent + delimiter * (3 + extra) + trailing,
+        ]
+    )
+    retrieved = evidence()
+    assert validate_answer(literal, retrieved) == UnknownAnswer()
+    for prefix in ("", continuation):
+        result = validate_answer(
+            f"{literal}{newline}{prefix}Actual answer [2] [999]", retrieved
+        )
+        assert result.known
+        assert result.answer == f"{literal}{newline}{prefix}Actual answer [2]"
+        assert result.citations == retrieved[1:]
+
+
+@pytest.mark.parametrize("opening,continuation", FENCE_CONTAINERS)
+@pytest.mark.parametrize("delimiter", ["`", "~"])
+@pytest.mark.parametrize(
+    "body_kind",
+    [
+        "mid-line",
+        "trailing-text",
+        "indented",
+        "shorter",
+        "opposite",
+    ],
+)
+def test_container_fence_body_delimiters_are_literal(
+    opening: str,
+    continuation: str,
+    delimiter: str,
+    body_kind: str,
+) -> None:
+    fence = delimiter * 4
+    body = {
+        "mid-line": f'print("{fence}")',
+        "trailing-text": fence + " text",
+        "indented": "    " + fence,
+        "shorter": delimiter * 3,
+        "opposite": ("~" if delimiter == "`" else "`") * 4,
+    }[body_kind]
+    literal = "\n".join(
+        [
+            opening + fence,
+            continuation + (" " if continuation.endswith(">") else "") + body,
+            continuation + "[1] [999]",
+        ]
+    )
+    retrieved = evidence()
+    assert validate_answer(literal, retrieved) == UnknownAnswer()
+    literal += "\n" + continuation + fence
+    result = validate_answer(f"{literal}\nActual answer [2] [999]", retrieved)
+    assert result.known and result.answer == f"{literal}\nActual answer [2]"
+    assert result.citations == retrieved[1:]
+
+
+@pytest.mark.parametrize("opening,continuation", FENCE_CONTAINERS)
+@pytest.mark.parametrize("delimiter", ["`", "~"])
+def test_leaving_container_ends_unclosed_fence(
+    opening: str,
+    continuation: str,
+    delimiter: str,
+) -> None:
+    literal = f"{opening}{delimiter * 3}\n{continuation}[1]"
+    result = validate_answer(f"{literal}\nActual answer [2] [999]", evidence())
+    assert result.known and result.answer == f"{literal}\nActual answer [2]"
+    assert [c.n for c in result.citations] == [2]
+
+
+@pytest.mark.parametrize(
+    "lead,prefix",
+    [
+        ("10. Example\n\n", "    "),
+        ("- Example\n\n  - Nested\n\n", "    "),
+        ("> 10. Example\n>\n", ">     "),
+        ("10. Example\n\n    > Quoted\n    >\n", "    > "),
+    ],
+)
+@pytest.mark.parametrize("delimiter", ["`", "~"])
+@pytest.mark.parametrize("extra", [0, 2])
+def test_list_continuation_fences_preserve_citation_boundaries(
+    lead: str, prefix: str, delimiter: str, extra: int
+) -> None:
+    literal = lead + "\n".join(
+        [
+            prefix + delimiter * 3 + "text",
+            prefix + "[1] [999]",
+            prefix + delimiter * (3 + extra),
+        ]
+    )
+    retrieved = evidence()
+    assert validate_answer(literal, retrieved) == UnknownAnswer()
+    result = validate_answer(f"{literal}\nActual answer [2] [999]", retrieved)
+    assert result.known and result.answer == f"{literal}\nActual answer [2]"
+    assert result.citations == retrieved[1:]
+
+
+@pytest.mark.parametrize("delimiter", ["`", "~"])
+def test_unclosed_inline_span_cannot_consume_container_fence(delimiter: str) -> None:
+    literal = (
+        f"Example ```unclosed\n> {delimiter * 3}\n"
+        f"> ``` ignored\n> [1]\n> {delimiter * 3}"
+    )
+    retrieved = evidence()
+    assert validate_answer(literal, retrieved) == UnknownAnswer()
+    result = validate_answer(f"{literal}\nActual answer [2] [999]", retrieved)
+    assert result.known and result.answer == f"{literal}\nActual answer [2]"
+    assert result.citations == retrieved[1:]
+
+
 @pytest.mark.parametrize(
     "prefix",
     ["", "> ", "- ", "+ ", "* ", "1. ", "1) ", "> - ", "- > ", "> > ", "> - 1) > "],

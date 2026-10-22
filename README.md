@@ -6,15 +6,15 @@ Ask questions about your team's code and docs and get answers with citations. Bu
 
 The app provides the application page, database migrations, health, build
 identity, a persistent source registry, and [hybrid search](docs/search.md) with
-commit-pinned citations over stored chunks. Background indexing, answers, and
-MCP are not built yet; accepted sources remain queued for a later worker.
+commit-pinned citations over stored chunks. Accepted sources are indexed in the
+background and become ready or failed with an error. Answers and MCP are not built yet.
 The model library provides deterministic fake embeddings and a quoting answerer.
 Search embeds each query with the active model. The [acquisition library](docs/file-selection.md)
-clones and selects commit-pinned text; registration does not yet invoke it.
+clones and selects commit-pinned text for the background worker.
 
 The pure [chunking library](docs/chunking.md) splits Markdown at headings and
 other text into overlapping line windows, preserving original text and exact
-inclusive line ranges. It is available independently of the future indexer.
+inclusive line ranges. The background worker uses it before embedding and storage.
 
 The model interfaces also provide configurable OpenRouter adapters. Real mode
 (the default) requires `OPENROUTER_API_KEY` at startup; use `TKA_MODELS=fake` for
@@ -99,14 +99,16 @@ limits, and error behavior.
 `status: "queued"`, null `indexed_commit`, `indexed_at` and `error`, zero
 `file_count` and `chunk_count`, and `created_at`. `GET /api/sources` returns an
 array of sources in creation order; `GET /api/sources/{id}` returns one source
-or 404 for an unknown UUID.
+or 404 for an unknown UUID. Registration also creates one durable queued job;
+the worker advances the source through indexing to ready, or failed with an error.
+Ready sources expose the complete indexed commit, file count and chunk count.
 
 `GET /api/sources/{id}/file?path=docs/deploy.md&start=14&end=18` returns
 exact inclusive lines at the persisted `indexed_commit`, with the commit, path,
 actual line bounds and total line count. Omit the range for the whole file.
 Reads use eligible cached Git blobs and never fetch upstream or read working
 files. Missing indexed content returns 404; unsafe paths or invalid ranges return
-422. Registration remains queued and does not create indexed content.
+422. Indexed content becomes available after the background job reaches ready.
 See the [source file contract](docs/source-files.md) for ranges, eligibility,
 storage safety, concurrency and the shared service used by future adapters.
 
@@ -115,8 +117,8 @@ normalize to the same URL. Duplicates return 409 with `detail` and the existing
 `id`, including simultaneous submissions. Invalid inputs return 422 with a reason.
 Only repository HTTPS URLs on github.com are accepted: no credentials, query,
 fragment, SSH, or blob/tree/file paths. Registration makes no GitHub request and
-does not establish repository existence or public visibility; future acquisition
-must use anonymous access. No credentials are stored or used.
+does not establish repository existence or public visibility; background acquisition
+uses anonymous access. No credentials are stored or used.
 
 With local sources enabled, pass an absolute Git working-tree root or bare
 repository path in `url`. The stored URL is the resolved local path, while
@@ -150,7 +152,7 @@ IDs containing only ASCII spaces (U+0020); other characters, including tabs and
 Unicode whitespace, remain significant, preserving the existing SQL domain.
 The low-level lexical API does not compare embeddings or call a model. Public
 [hybrid search](docs/search.md) combines it with compatible exact cosine candidates
-and returns commit-pinned evidence. Ingestion integration remains a future increment.
+and returns commit-pinned evidence. See [background ingestion](docs/background-ingest.md) for jobs, limits and deployment.
 
 ## Checks
 

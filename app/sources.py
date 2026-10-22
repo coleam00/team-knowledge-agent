@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from psycopg.rows import TupleRow, dict_row
 from pydantic import BaseModel, NonNegativeInt, StrictStr
 
-from app import db
+from app import db, jobs
 from app.config import Settings
 from app.git import git
 from app.source_files import (
@@ -150,7 +150,9 @@ def source_router(get_settings: Callable[[], Settings]) -> APIRouter:
                 )
                 row = cursor.fetchone()
                 if row is not None:
-                    return Source.model_validate(row)
+                    source = Source.model_validate(row)
+                    jobs.enqueue(connection, source.id)
+                    return source
                 # A separate statement sees the winning concurrent transaction.
                 cursor.execute("SELECT id FROM sources WHERE url = %s", (location.url,))
                 existing = cursor.fetchone()

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from app import db, main, source_files, sources
 from app.chunking import chunk_text
 from app.config import Settings
+from app.features import f15_ingest
 from app.ingest import CloneSelectError, SelectedFile, SourceSpec, clone_and_select
 from app.ingest.contracts import ErrorCode
 from app.source_files import SourceFileError, SourceFileErrorCode, fetch_source_file
@@ -38,6 +39,7 @@ class FileClient:
 def file_client(
     monkeypatch: pytest.MonkeyPatch, client_factory: ClientFactory
 ) -> Iterator[FileClient]:
+    monkeypatch.setattr(f15_ingest, "run_worker", lambda settings, stop: None)
     source_id = uuid4()
     row: dict[str, object] = {
         "id": source_id,
@@ -279,6 +281,7 @@ def test_registry_cache_http_lifecycle(
     tmp_path: Path,
     client_factory: ClientFactory,
 ) -> None:
+    monkeypatch.setattr(f15_ingest, "run_worker", lambda settings, stop: None)
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("TKA_ALLOW_LOCAL_SOURCES", "1")
     repository = create_handbook_repo(tmp_path)

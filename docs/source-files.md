@@ -2,10 +2,10 @@
 
 `GET /api/sources/{id}/file?path=docs/deploy.md&start=14&end=18`
 returns eligible text from the source's persisted `indexed_commit`. It never
-fetches upstream, reads working files, or resolves HEAD. Registration still
-leaves sources queued: until the worker exists, tests and runtime checks use
-`clone_and_select` and update the source record directly. No `files` rows are
-required by this reader.
+fetches upstream, reads working files, or resolves HEAD. The background worker
+publishes the indexed commit after preparing the complete snapshot. No `files`
+rows are required by this reader; it validates eligible content in the pinned
+Git cache.
 
 HTTP and future adapters share the synchronous service:
 
@@ -44,7 +44,8 @@ remain cached.
 ## Eligibility and confinement
 
 The reader uses the same [file selection policy](file-selection.md) as ingestion:
-regular blobs (`100644` or `100755`), supported paths, at most 1,000,000 bytes,
+regular blobs (`100644` or `100755`), supported paths, the configured
+`TKA_INGEST_MAX_FILE_BYTES` cap (default 1,000,000 bytes),
 strict UTF-8 and no disallowed binary controls. Symlinks, gitlinks, directories,
 binary files, excluded paths and oversized files are unavailable. Empty eligible
 files are supported. Whole-repository acquisition limits do not limit a read.

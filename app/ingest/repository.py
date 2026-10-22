@@ -385,7 +385,9 @@ def _read_cached_file(
         for record in tree.split(b"\0"):
             if not record:
                 continue
-            entry = eligible_record(record, path=path)
+            entry = eligible_record(
+                record, path=path, max_file_bytes=settings.ingest_max_file_bytes
+            )
             if entry is not None:
                 file = read_blob(runner, repository, entry)
                 if file is not None:

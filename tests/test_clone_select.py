@@ -997,14 +997,16 @@ def test_success_also_reaps_descendants(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows job ownership")
+@pytest.mark.parametrize("stage", ["assign", "resume"])
 def test_failed_job_assignment_never_launches_command(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    stage: str,
 ) -> None:
     if sys.platform == "win32":
         monkeypatch.setattr(
             _ownership._Job,
-            "assign",
+            stage,
             Mock(side_effect=OSError("assignment failed")),
         )
     sentinel = tmp_path / "should-not-exist"

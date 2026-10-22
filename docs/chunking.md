@@ -2,7 +2,7 @@
 
 `app.chunking.chunk_text` is a pure library for decoded source text. It performs
 no file, database, network, or model calls and never executes source content.
-Indexing and persistence are separate, later increments.
+The [background worker](background-ingest.md) calls it before embedding and persistence.
 
 ```python
 from app.chunking import chunk_text
@@ -49,7 +49,7 @@ chunk.content == "".join(lines[chunk.start_line - 1 : chunk.end_line])
 chunk.end_line - chunk.start_line + 1 <= window_lines
 ```
 
-No separator is inserted when joining. Future file readers must preserve decoded
+No separator is inserted when joining. File readers must preserve decoded
 newlines, for example with `open(..., encoding="utf-8", newline="")`; default
 universal-newline reading can silently change CRLF before the library sees it.
 The guarantee applies to the input string, not its original encoding or bytes.

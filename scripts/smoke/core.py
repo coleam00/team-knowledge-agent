@@ -19,6 +19,7 @@ import httpx
 
 from app.config import Settings
 from app.db import MIGRATIONS, connect, migration_files
+from app.ingest._ownership import ProcessTree
 from app.sources import Source
 from tests.handbook import create_handbook_repo
 
@@ -63,9 +64,10 @@ def running_app(
         port = allocation.getsockname()[1]
     command = [sys.executable, "-m", "app", "serve", "--port", str(port)]
     with tempfile.TemporaryFile() as log:
-        process = subprocess.Popen(
-            command, cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT
+        tree = ProcessTree(
+            command, ROOT, environment, stdout=log.fileno(), stderr=log.fileno()
         )
+        process = tree.proc
         details: dict[str, object] = {"pid": process.pid, "argv": command}
         observations[label] = details
         try:
@@ -74,13 +76,7 @@ def running_app(
             ) as client:
                 yield process, client
         finally:
-            if process.poll() is None:
-                process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+            tree.close()
             details["exit_code"] = process.returncode
             details["cleanup_confirmed"] = process.poll() is not None
             log.seek(0)
@@ -153,7 +149,21 @@ def register_handbook(client: httpx.Client, state: Path) -> Source:
     assert source.indexed_commit is None
     assert source.indexed_at is None
     assert source.error is None
-    assert client.get(f"/api/sources/{source.id}").json() == response.json()
+    observed = Source.model_validate(client.get(f"/api/sources/{source.id}").json())
+    assert observed.status in {"queued", "indexing", "ready"}
+    if observed.status != "ready":
+        assert observed == source.model_copy(update={"status": observed.status})
+    else:
+        assert (
+            observed.id,
+            observed.url,
+            observed.owner,
+            observed.name,
+            observed.created_at,
+        ) == (source.id, source.url, source.owner, source.name, source.created_at)
+        assert (
+            observed.indexed_commit and observed.indexed_at and observed.error is None
+        )
     duplicate = client.post("/api/sources", json={"url": str(repository)})
     assert duplicate.status_code == 409
     assert duplicate.json()["id"] == str(source.id)
@@ -161,7 +171,11 @@ def register_handbook(client: httpx.Client, state: Path) -> Source:
         "/api/sources", json={"url": "https://gitlab.com/acme/handbook"}
     )
     assert invalid.status_code == 422
-    return source
+    # All feature fixtures must finish ingestion before manual snapshot setup.
+    # Import here to avoid a cycle with the feature's Context dependency.
+    from scripts.smoke.features.f15_ingest import wait_for_source
+
+    return wait_for_source(client, source)
 
 
 def ledger(database_url: str) -> list[dict[str, object]]:

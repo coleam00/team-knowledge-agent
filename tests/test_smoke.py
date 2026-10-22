@@ -25,7 +25,7 @@ def test_absent_features_exclude_delivered_search() -> None:
         transport=httpx.MockTransport(respond), base_url="http://test"
     ) as client:
         observations = f90_unbuilt.absent_features(client)
-    assert paths == ["/api/sources/1/reindex", "/api/ask", "/mcp"]
+    assert paths == ["/api/sources/1/reindex", "/api/ask"]
     assert all(item["stage"] == "not yet built" for item in observations)
 
 

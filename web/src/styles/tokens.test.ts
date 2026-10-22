@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const css = readFileSync(resolve('src/styles/tokens.css'), 'utf8')
-const [dark, light] = css.split('@media (prefers-color-scheme: light)')
+const [dark, light] = css.split(":root[data-theme='light']")
 const palettes = {
   dark: { background: '#0e1116', surface: '#161b22', raised: '#1f2630', border: '#2d3440', text: '#e6edf3', 'text-muted': '#9aa4b2', accent: '#6cb6ff', success: '#3fb950', warning: '#d29922', danger: '#f85149' },
   light: { background: '#ffffff', surface: '#f6f8fa', border: '#d0d7de', text: '#1f2328', 'text-muted': '#59636e', accent: '#0969da' },

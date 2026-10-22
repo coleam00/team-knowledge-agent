@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const [dark, light] = readFileSync(resolve('src/styles/tokens.css'), 'utf8').split('@media (prefers-color-scheme: light)')
+const [dark, light] = readFileSync(resolve('src/styles/tokens.css'), 'utf8').split(":root[data-theme='light']")
 function tokens(css: string) {
   return Object.fromEntries([...css.matchAll(/--([\w-]+):\s*(#[\da-f]{6});/gi)].map(match => [match[1]!, match[2]!]))
 }

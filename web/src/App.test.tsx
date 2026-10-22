@@ -1,27 +1,29 @@
-﻿import { render, screen, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
 beforeEach(() => {
   window.history.replaceState(null, '', '/')
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })))
 })
+
+afterEach(() => vi.unstubAllGlobals())
 
 describe('application shell', () => {
   it.each([
     ['ask', 'Ask', 'Press Enter to ask, or Shift+Enter for a new line.'],
-    ['sources', 'Sources', 'Adding repositories will be available in a later release.'],
-  ])('identifies the app and explains availability on %s', (route, heading, notice) => {
+    ['sources', 'Sources', 'Add a repository to make its code and docs available to your team.'],
+  ])('identifies the app and explains availability on %s', async (route, heading, notice) => {
     window.history.replaceState(null, '', `/#/${route}`)
     render(<App />)
     expect(screen.getByText(/^Team Knowledge\s*Agent$/)).toBeVisible()
     const main = within(screen.getByRole('main'))
     expect(main.getByRole('heading', { level: 1, name: heading })).toBeVisible()
-    expect(main.getByText(notice)).toBeVisible()
+    expect(await main.findByText(notice)).toBeVisible()
   })
 
-  it('navigates exactly Ask and Sources by pointer without a backend', async () => {
-    const request = vi.spyOn(globalThis, 'fetch')
+  it('navigates exactly Ask and Sources by pointer, loading sources from the API', async () => {
     const user = userEvent.setup()
     render(<App />)
     const nav = within(screen.getByRole('navigation', { name: 'Main navigation' }))
@@ -29,12 +31,11 @@ describe('application shell', () => {
     expect(nav.getByRole('link', { name: 'Ask' })).toHaveAttribute('aria-current', 'page')
     await user.click(nav.getByRole('link', { name: 'Sources' }))
     expect(await screen.findByRole('heading', { level: 1, name: 'Sources' })).toBeVisible()
-    expect(screen.getByText('No sources yet')).toBeVisible()
+    expect(await screen.findByText('No sources yet')).toBeVisible()
     expect(nav.getByRole('link', { name: 'Sources' })).toHaveAttribute('aria-current', 'page')
     await user.click(nav.getByRole('link', { name: 'Ask' }))
     expect(await screen.findByRole('heading', { level: 1, name: 'Ask' })).toBeVisible()
-    expect(request).not.toHaveBeenCalled()
-    request.mockRestore()
+    expect(fetch).toHaveBeenCalledWith('/api/sources')
   })
 
   it('navigates by Tab and Enter and exposes a skip link', async () => {
